@@ -1,3 +1,5 @@
+import psycopg2
+import psycopg2.extras
 """
 handlers/student/waiting.py — O'quvchi waiting holatlari
 
@@ -50,12 +52,14 @@ async def handle_waiting(update: Update, context: ContextTypes.DEFAULT_TYPE, wai
 
         # is_late ni yangilash
         if is_late:
-            with db.conn() as c:
-                c.execute(
-                    "UPDATE submissions SET is_late=1 WHERE id=?",
-                    (submission_id,)
-                )
+            with db.conn() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+                    c.execute(
+                        "UPDATE submissions SET is_late=1 WHERE id=%s",
+                        (submission_id,)
+                    )
 
+                conn.commit()
         # Context ga submission_id saqlash (qo'shimcha fayllar uchun)
         context.user_data['tmp_submission_id'] = submission_id
         context.user_data['waiting_for']        = 'student_extra_files'

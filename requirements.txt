@@ -1,8 +1,8 @@
 # Telegram Bot
 python-telegram-bot==21.9
 
-# Database
-# (SQLite is built-in)
+# Database — PostgreSQL
+psycopg2-binary==2.9.9
 
 # Environment
 python-dotenv==1.0.0

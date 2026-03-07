@@ -1,3 +1,5 @@
+import psycopg2
+import psycopg2.extras
 """
 panels/super/waiting.py — Super Admin waiting holatlari
 
@@ -36,8 +38,10 @@ async def handle_waiting(update: Update, context: ContextTypes.DEFAULT_TYPE, wai
             await update.message.reply_text("❌ Xato. Qaytadan urinib ko'ring.")
             return
         # Nomni o'zgartirish — add_school UNIQUE constraint bor, shuning uchun update:
-        with db.conn() as c:
-            c.execute("UPDATE schools SET name=? WHERE id=?", (name, sid))
+        with db.conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+                c.execute("UPDATE schools SET name=%s WHERE id=%s", (name, sid))
+            conn.commit()
         context.user_data.pop('waiting_for', None)
         await update.message.reply_text(f"✅ Maktab nomi *{name}* ga o'zgartirildi.", parse_mode="Markdown")
 

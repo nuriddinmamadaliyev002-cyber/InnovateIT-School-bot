@@ -1,3 +1,5 @@
+import psycopg2
+import psycopg2.extras
 """
 panels/admin/callbacks.py — Maktab Admin inline callback handlerlari
 
@@ -483,8 +485,10 @@ async def _inner(query, context, data, school_id):
         cid = int(data.split("_")[-1])
         tid = context.user_data.pop('tmp_student_id', None)
         if tid:
-            with db.conn() as c:
-                c.execute("UPDATE whitelist SET class_id=? WHERE telegram_id=?", (cid, tid))
+            with db.conn() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+                    c.execute("UPDATE whitelist SET class_id=%s WHERE telegram_id=%s", (cid, tid))
+                conn.commit()
             st  = db.get_whitelist_user(tid)
             cls = db.get_class(cid)
             await query.edit_message_text(
@@ -720,12 +724,13 @@ async def _inner(query, context, data, school_id):
         # telegram_id yoki teacher.id bo'lishi mumkin — ikkalasini sinab ko'ramiz
         teacher_obj = None
         # tid = telegram_id kelishi mumkin
-        import sqlite3 as _sqlite3
-        with db.conn() as _c:
-            row = _c.execute("SELECT * FROM teachers WHERE telegram_id=? AND school_id=?",
-                             (int(tid), school_id)).fetchone()
-            if row:
-                teacher_obj = row
+        with db.conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as _c:
+                row = _c.execute("SELECT * FROM teachers WHERE telegram_id=%s AND school_id=%s",
+                                 (int(tid), school_id)).fetchone()
+                if row:
+                    teacher_obj = row
+            conn.commit()
         if not teacher_obj:
             await query.edit_message_text("❌ O'qituvchi topilmadi.")
             return
@@ -742,9 +747,11 @@ async def _inner(query, context, data, school_id):
     # ── Butunlay o'chirish ────────────────────────────────────────
     elif data.startswith("adm_del_teacher_ok_"):
         tid  = int(data.split("_")[-1])
-        with db.conn() as _c:
-            t = _c.execute("SELECT * FROM teachers WHERE telegram_id=? AND school_id=?",
-                           (tid, school_id)).fetchone()
+        with db.conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as _c:
+                t = _c.execute("SELECT * FROM teachers WHERE telegram_id=%s AND school_id=%s",
+                               (tid, school_id)).fetchone()
+            conn.commit()
         name = t['full_name'] if t else "O'qituvchi"
         teacher_id = t['id'] if t else None
         if teacher_id:
@@ -804,8 +811,10 @@ async def _inner(query, context, data, school_id):
     # ── O'qituvchini tiklash ──────────────────────────────────────
     elif data.startswith("adm_restore_teacher_"):
         teacher_id = int(data.split("_")[-1])
-        with db.conn() as _c:
-            t = _c.execute("SELECT * FROM teachers WHERE id=?", (teacher_id,)).fetchone()
+        with db.conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as _c:
+                t = _c.execute("SELECT * FROM teachers WHERE id=%s", (teacher_id,)).fetchone()
+            conn.commit()
         db.restore_teacher(teacher_id)
         name = t['full_name'] if t else str(teacher_id)
         await query.edit_message_text(
@@ -1014,8 +1023,10 @@ async def _inner(query, context, data, school_id):
     elif data.startswith("adm_sched_del_"):
         cid = int(data.split("_")[-1])
         cls = db.get_class(cid)
-        with db.conn() as c:
-            c.execute("DELETE FROM schedules WHERE class_id=?", (cid,))
+        with db.conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+                c.execute("DELETE FROM schedules WHERE class_id=%s", (cid,))
+            conn.commit()
         await query.edit_message_text(
             f"✅ *{cls['name']}* jadvali o'chirildi.", parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[

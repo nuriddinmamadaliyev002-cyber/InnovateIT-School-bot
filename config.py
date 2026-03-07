@@ -73,4 +73,4 @@ def utc_to_tashkent(utc_str: str, fmt_out: str = "%Y-%m-%d %H:%M") -> str:
 
 # ── DB instansiyasi ───────────────────────────────────────────────
 from core.db import DB
-db = DB("school.db")
+db = DB()

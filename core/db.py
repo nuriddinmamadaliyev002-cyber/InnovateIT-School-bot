@@ -37,6 +37,6 @@ class DB(
         db.save_attendance(class_id, subject_id, date, data)
     """
 
-    def __init__(self, db_path: str):
-        BaseDB.__init__(self, db_path)
+    def __init__(self):
+        BaseDB.__init__(self)
         self.init_tables()

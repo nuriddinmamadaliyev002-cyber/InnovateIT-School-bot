@@ -1,3 +1,5 @@
+import psycopg2
+import psycopg2.extras
 """
 panels/admin/waiting.py — Maktab Admin waiting holatlari
 
@@ -54,8 +56,10 @@ async def handle_waiting(update: Update, context: ContextTypes.DEFAULT_TYPE, wai
         cid  = context.user_data.pop('tmp_class_id', None)
         if not name or not cid:
             return
-        with db.conn() as c:
-            c.execute("UPDATE classes SET name=? WHERE id=?", (name, cid))
+        with db.conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+                c.execute("UPDATE classes SET name=%s WHERE id=%s", (name, cid))
+            conn.commit()
         context.user_data.pop('waiting_for', None)
         await update.message.reply_text(f"✅ Sinf nomi *{name}* ga o'zgartirildi.", parse_mode="Markdown")
 
@@ -153,8 +157,10 @@ async def handle_waiting(update: Update, context: ContextTypes.DEFAULT_TYPE, wai
         sid  = context.user_data.pop('tmp_subject_id', None)
         if not name or not sid:
             return
-        with db.conn() as c:
-            c.execute("UPDATE subjects SET name=? WHERE id=?", (name, sid))
+        with db.conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+                c.execute("UPDATE subjects SET name=%s WHERE id=%s", (name, sid))
+            conn.commit()
         context.user_data.pop('waiting_for', None)
         await update.message.reply_text(f"✅ Fan nomi *{name}* ga o'zgartirildi.", parse_mode="Markdown")
 
