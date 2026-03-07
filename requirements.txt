@@ -1,0 +1,20 @@
+# Telegram Bot
+python-telegram-bot==21.9
+
+# Database
+# (SQLite is built-in)
+
+# Environment
+python-dotenv==1.0.0
+
+# Excel Export
+openpyxl==3.1.2
+
+# PDF Export
+reportlab==4.0.7
+
+# Image Processing
+Pillow==10.1.0
+
+# HTTP Requests (for proxy)
+httpx[socks]==0.25.2
