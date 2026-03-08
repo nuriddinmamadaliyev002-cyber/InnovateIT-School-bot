@@ -102,14 +102,32 @@ async def handle_super_callback(query, context: ContextTypes.DEFAULT_TYPE, data:
         sid    = int(data.split("_")[-1])
         school = db.get_school(sid)
         name   = school['name'] if school else "Maktab"
-        db.delete_school(sid)
-        await query.edit_message_text(
-            f"✅ *{name}* o'chirildi.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔙 Maktablar", callback_data="sup_schools_list")
-            ]])
-        )
+        try:
+            db.delete_school(sid)
+            await query.edit_message_text(
+                f"✅ *{name}* muvaffaqiyatli o'chirildi.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Maktablar", callback_data="sup_schools_list")
+                ]])
+            )
+        except ValueError as e:
+            # User'ga tushunarli xato xabari
+            await query.answer(str(e), show_alert=True)
+            # Orqaga qaytarish
+            st = db.get_school_stats(sid)
+            await query.edit_message_text(
+                f"⚠️ *{name}* maktabini o'chirasizmi?\n\n"
+                f"Birga o'chadi: {st['classes']} sinf, {st['students']} o'quvchi, "
+                f"{st['teachers']} o'qituvchi\n\n⚠️ *Qaytarib bo'lmaydi!*",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Ha, o'chirish", callback_data=f"sup_del_school_ok_{sid}")],
+                    [InlineKeyboardButton("❌ Bekor",         callback_data=f"sup_school_{sid}")],
+                ])
+            )
+        except Exception as e:
+            await query.answer(f"❌ Xatolik: {str(e)}", show_alert=True)
 
     elif data.startswith("sup_del_school_"):
         sid    = int(data.split("_")[-1])

@@ -35,8 +35,35 @@ class SchoolRepo(BaseDB):
             return row[0] if row else None
 
     def delete_school(self, school_id: int):
+        """Maktabni o'chirish. Agar bog'liq ma'lumotlar bo'lsa, ValueError qaytaradi."""
         with self.conn() as conn:
             with conn.cursor() as cur:
+                # Maktabda ma'lumotlar bormi tekshirish
+                cur.execute("SELECT COUNT(*) FROM classes WHERE school_id=%s", (school_id,))
+                classes_count = cur.fetchone()[0]
+                
+                cur.execute("SELECT COUNT(*) FROM subjects WHERE school_id=%s", (school_id,))
+                subjects_count = cur.fetchone()[0]
+                
+                cur.execute("SELECT COUNT(*) FROM teachers WHERE school_id=%s", (school_id,))
+                teachers_count = cur.fetchone()[0]
+                
+                cur.execute("SELECT COUNT(*) FROM whitelist WHERE school_id=%s", (school_id,))
+                students_count = cur.fetchone()[0]
+                
+                # Agar ma'lumotlar bo'lsa, xato ko'rsatish
+                if classes_count > 0 or subjects_count > 0 or teachers_count > 0 or students_count > 0:
+                    raise ValueError(
+                        f"❌ Maktabni o'chira olmadim!\n\n"
+                        f"Bu maktabda hali quyidagi ma'lumotlar mavjud:\n"
+                        f"📚 Sinflar: {classes_count} ta\n"
+                        f"📖 Predmetlar: {subjects_count} ta\n"
+                        f"👨‍🏫 O'qituvchilar: {teachers_count} ta\n"
+                        f"👨‍🎓 O'quvchilar: {students_count} ta\n\n"
+                        f"Avval bu ma'lumotlarni o'chiring, keyin maktabni o'chiring!"
+                    )
+                
+                # Bo'sh bo'lsa, o'chirish
                 cur.execute("DELETE FROM schools WHERE id=%s", (school_id,))
             conn.commit()
 
