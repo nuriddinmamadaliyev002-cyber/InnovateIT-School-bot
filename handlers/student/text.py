@@ -92,25 +92,42 @@ async def handle_student_text(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
     elif text == "⭐ Baholarim":
-        yesterday    = (date.today() - timedelta(days=1)).isoformat()
-        two_days_ago = (date.today() - timedelta(days=2)).isoformat()
+        from config import WEEKDAY_UZ
+        
+        # Oxirgi 10 kundan yakshanba (6) bo'lmaganlarini tanlaymiz
+        buttons = []
+        days_added = 0
+        check_day = 0
+        
+        while days_added < 3 and check_day < 30:  # Max 30 kun orqaga
+            check_date = date.today() - timedelta(days=check_day)
+            weekday = check_date.weekday()  # 0=Dushanba, 6=Yakshanba
+            
+            # Yakshanba (6) bo'lmasa qo'shamiz
+            if weekday != 6:
+                weekday_name = WEEKDAY_UZ.get(check_date.strftime('%A'), '')
+                date_str = check_date.strftime('%d.%m.%Y')
+                
+                # Bugun va kecha so'zlarini qo'shamiz
+                if check_day == 0:
+                    label = f"📅 Bugun, {weekday_name} ({date_str})"
+                elif check_day == 1:
+                    label = f"📅 Kecha, {weekday_name} ({date_str})"
+                else:
+                    label = f"📅 {weekday_name} ({date_str})"
+                
+                buttons.append([InlineKeyboardButton(
+                    label,
+                    callback_data=f"stu_grades_date_{check_date.isoformat()}"
+                )])
+                days_added += 1
+            
+            check_day += 1
+        
         await update.message.reply_text(
             "⭐ *Baholarim* — Qaysi kunni ko'rmoqchisiz?",
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(
-                    f"📅 Bugun ({date.today().strftime('%d.%m.%Y')})",
-                    callback_data=f"stu_grades_date_{today_str}"
-                )],
-                [InlineKeyboardButton(
-                    f"📅 Kecha ({date.fromisoformat(yesterday).strftime('%d.%m.%Y')})",
-                    callback_data=f"stu_grades_date_{yesterday}"
-                )],
-                [InlineKeyboardButton(
-                    f"📅 {date.fromisoformat(two_days_ago).strftime('%d.%m.%Y')}",
-                    callback_data=f"stu_grades_date_{two_days_ago}"
-                )],
-            ])
+            reply_markup=InlineKeyboardMarkup(buttons)
         )
 
     elif text == "🏆 Mening reytingim":

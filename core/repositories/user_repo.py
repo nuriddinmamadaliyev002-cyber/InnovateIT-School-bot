@@ -119,6 +119,15 @@ class UserRepo(BaseDB):
         with self.conn() as conn:
             return self._fetchone(conn, "SELECT * FROM teachers WHERE id=%s", (teacher_id,))
 
+    def get_teacher_any(self, telegram_id: int):
+        """Arxivlangan bo'lsa ham o'qituvchini oladi"""
+        with self.conn() as conn:
+            return self._fetchone(conn, """
+                SELECT t.*, s.name AS school_name
+                FROM teachers t JOIN schools s ON t.school_id=s.id
+                WHERE t.telegram_id=%s
+            """, (telegram_id,))
+
     def get_whitelist_user_any(self, telegram_id: int):
         with self.conn() as conn:
             return self._fetchone(conn, """

@@ -66,7 +66,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if assignments else "Biriktirilmagan"
             )
             await update.message.reply_text(
-                f"👋 Salom, *{teacher['full_name']}*!\n"
+                f"👋 Salom, *{teacher['full_name']}*!\nSiz o'qituvchi sifatida tizimga kirdingiz\n"
                 f"🏫 Maktab: *{teacher['school_name']}*\n"
                 f"📚 Sinflar: *{classes_str}*",
                 parse_mode="Markdown",
@@ -113,16 +113,51 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(buttons)
         )
         return
+    
+    # Agar faol o'qituvchi topilmasa, arxivlanganligini tekshirish
+    archived_teacher = db.get_teacher_any(user.id)
+    if archived_teacher and archived_teacher.get('is_active') == 0:
+        await update.message.reply_text(
+            f"📦 Salom, *{archived_teacher['full_name']}*!\n\n"
+            f"⚠️ *Sizning o'qituvchi akkauntingiz arxivlangan.*\n\n"
+            f"Bu degani:\n"
+            f"   • Siz hozirda faol o'qituvchilar ro'yxatida yo'qsiz\n"
+            f"   • Sizning barcha darslar va uyga vazifalar ma'lumotlaringiz saqlanib qolgan\n"
+            f"   • Yangi darslar yarata olmaysiz\n\n"
+            f"📞 *Qayta faollashtirish uchun:*\n"
+            f"👉 Maktab adminingizga murojaat qiling\n\n"
+            f"🏫 Maktab: *{archived_teacher.get('school_name', 'N/A')}*\n"
+            f"📋 Telegram ID: `{user.id}`",
+            parse_mode="Markdown"
+        )
+        return
 
     # 4. O'quvchi
     wl = db.get_whitelist_user(user.id)
     if wl:
+        # Arxivlangan o'quvchini tekshirish
+        if wl.get('is_active') == 0:
+            await update.message.reply_text(
+                f"📦 Salom, *{wl['full_name']}*!\n\n"
+                f"⚠️ *Sizning akkauntingiz arxivlangan.*\n\n"
+                f"Bu degani:\n"
+                f"   • Siz hozirda faol o'quvchi ro'yxatida yo'qsiz\n"
+                f"   • Davomat va baholaringiz saqlanib qolgan\n"
+                f"   • Yangi topshiriqlar ko'rinmaydi\n\n"
+                f"📞 *Qayta faollashtirish uchun:*\n"
+                f"👉 Maktab adminingizga murojaat qiling\n\n"
+                f"📋 Telegram ID: `{user.id}`",
+                parse_mode="Markdown"
+            )
+            return
+        
+        # Faol o'quvchi
         await update.message.reply_text(
     f"👋 Salom, *{wl['full_name']}*!\n"
     f"🏫 *{wl['school_name']}* ning rasmiy ta'lim botiga xush kelibsiz!\n\n"
     f"📌 *Sizning ma'lumotlaringiz:*\n"
-    f"   • Sinf: *{wl['class_name']}*\n"
     f"   • Maktab: *{wl['school_name']}*\n\n"
+    f"   • Sinf: *{wl['class_name']}*\n"
     f"📚 *Bu bot orqali siz:*\n"
     f"   ✅ Uyga vazifalar va mavzularni ko'rishingiz\n"
     f"   ✅ Davomat va baholaringizni kuzatishingiz\n"
