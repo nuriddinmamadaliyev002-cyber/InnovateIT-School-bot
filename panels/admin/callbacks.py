@@ -726,8 +726,9 @@ async def _inner(query, context, data, school_id):
         # tid = telegram_id kelishi mumkin
         with db.conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as _c:
-                row = _c.execute("SELECT * FROM teachers WHERE telegram_id=%s AND school_id=%s",
-                                 (int(tid), school_id)).fetchone()
+                _c.execute("SELECT * FROM teachers WHERE telegram_id=%s AND school_id=%s",
+                           (int(tid), school_id))
+                row = _c.fetchone()
                 if row:
                     teacher_obj = row
             conn.commit()
@@ -749,8 +750,9 @@ async def _inner(query, context, data, school_id):
         tid  = int(data.split("_")[-1])
         with db.conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as _c:
-                t = _c.execute("SELECT * FROM teachers WHERE telegram_id=%s AND school_id=%s",
-                               (tid, school_id)).fetchone()
+                _c.execute("SELECT * FROM teachers WHERE telegram_id=%s AND school_id=%s",
+                           (tid, school_id))
+                t = _c.fetchone()
             conn.commit()
         name = t['full_name'] if t else "O'qituvchi"
         teacher_id = t['id'] if t else None
@@ -813,7 +815,8 @@ async def _inner(query, context, data, school_id):
         teacher_id = int(data.split("_")[-1])
         with db.conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as _c:
-                t = _c.execute("SELECT * FROM teachers WHERE id=%s", (teacher_id,)).fetchone()
+                _c.execute("SELECT * FROM teachers WHERE id=%s", (teacher_id,))
+                t = _c.fetchone()
             conn.commit()
         db.restore_teacher(teacher_id)
         name = t['full_name'] if t else str(teacher_id)
