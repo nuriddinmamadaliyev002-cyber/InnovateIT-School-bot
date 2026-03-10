@@ -79,10 +79,25 @@ async def handle_teacher_text(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     elif text == "📨 O'quvchi vazifalari":
         context.user_data['teacher_action'] = 'view_submissions'
+        groups = db.get_teacher_groups(teacher_id)
+
+        btns = []
+        if classes:
+            btns.append([InlineKeyboardButton("📚 Yakka sinflar ⬇", callback_data="noop")])
+            for c in classes:
+                btns.append([InlineKeyboardButton(f"🏫 {c['name']}", callback_data=f"tch_sub_class_{c['id']}")])
+        if groups:
+            btns.append([InlineKeyboardButton("👥 Sinf guruhlari ⬇", callback_data="noop")])
+            for g in groups:
+                btns.append([InlineKeyboardButton(
+                    f"👥 {g['group_name']} ({g['class_count']} ta sinf)",
+                    callback_data=f"tch_sub_group_{g['id']}"
+                )])
+
         await update.message.reply_text(
             f"{badge}📨 *O'quvchi vazifalari* — Sinf tanlang:",
             parse_mode="Markdown",
-            reply_markup=kb_classes(classes, prefix="tch_sub_class")
+            reply_markup=InlineKeyboardMarkup(btns) if btns else None
         )
 
     elif text == "🗓 Dars jadvali":
@@ -146,13 +161,31 @@ async def handle_teacher_text(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     elif text == "⭐ O'quvchilarni baholash":
         context.user_data['teacher_action'] = 'grading'
-        btns = [
-            [InlineKeyboardButton(f"🏫 {c['name']}", callback_data=f"grade_class_{c['id']}")]
-            for c in classes
-        ]
+        teacher_id = teacher['id']
+        groups = db.get_teacher_groups(teacher_id)
+
+        btns = []
+        # Avval guruhlarni ko'rsatamiz
+        if groups:
+            for g in groups:
+                btns.append([InlineKeyboardButton(
+                    f"👥 {g['group_name']} ({g['subject_name']})",
+                    callback_data=f"grade_group_{g['id']}"
+                )])
+        # Keyin alohida sinflarni ko'rsatamiz
+        for c in classes:
+            btns.append([InlineKeyboardButton(f"🏫 {c['name']}", callback_data=f"grade_class_{c['id']}")])
+
         btns.append([InlineKeyboardButton("❌ Bekor", callback_data="tch_cancel")])
+
+        header = f"{badge}⭐ *O'quvchilarni baholash*\n\n"
+        if groups:
+            header += "👥 *Guruhlar* va 🏫 *Sinflar* dan birini tanlang:"
+        else:
+            header += "🏫 *Sinf tanlang:*"
+
         await update.message.reply_text(
-            f"{badge}⭐ *O'quvchilarni baholash* — Sinf tanlang:",
+            header,
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(btns)
         )
@@ -172,23 +205,27 @@ async def handle_teacher_text(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif text == "📊 Mening davomatim":
         month = date.today().strftime("%Y-%m")
         records = db.get_teacher_attendance_for_teacher(teacher_id, month)
-        STATUS_EMOJI = {'present': '✅', 'absent': '❌', 'late': '⏰'}
-        STATUS_LABEL = {'present': 'Keldi', 'absent': 'Kelmadi', 'late': 'Kech keldi'}
+        STATUS_EMOJI = {'present': '✅', 'absent': '❌', 'late': '⏰', 'excused': '📝'}
+        STATUS_LABEL = {'present': 'Keldi', 'absent': 'Kelmadi', 'late': 'Kech keldi', 'excused': 'Sababli'}
         present = sum(1 for r in records if r['status'] == 'present')
         absent  = sum(1 for r in records if r['status'] == 'absent')
         late    = sum(1 for r in records if r['status'] == 'late')
+        excused = sum(1 for r in records if r['status'] == 'excused')
         lines = [
             f"{badge}📊 *Mening davomatim — {month}*\n",
             f"✅ Keldi: *{present}* kun",
             f"❌ Kelmadi: *{absent}* kun",
             f"⏰ Kech keldi: *{late}* kun",
         ]
+        if excused:
+            lines.append(f"📝 Sababli: *{excused}* kun")
         if records:
             lines.append("\n📋 *Kunlar bo'yicha:*")
             for r in records:
                 emoji = STATUS_EMOJI.get(r['status'], '?')
                 label = STATUS_LABEL.get(r['status'], r['status'])
-                lines.append(f"  {emoji} {r['date']} — {label}")
+                hours_txt = f" | ⏱ {r['hours']} soat" if r.get('hours') else ""
+                lines.append(f"  {emoji} {r['date']} — {label}{hours_txt}")
         else:
             lines.append("\n❌ Bu oy uchun ma'lumot yo'q.")
         await update.message.reply_text(

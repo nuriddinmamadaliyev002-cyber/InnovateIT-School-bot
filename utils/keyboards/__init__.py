@@ -6,6 +6,8 @@ from .inline_kb import (
 )
 from .attendance_kb import kb_student_attendance, kb_teacher_attendance, kb_teacher_att_dates, kb_att_dates_for_class
 from .grade_kb import (
-    kb_grade_criteria, kb_grade_students, kb_grade_score,
+    kb_grade_dates,
+    kb_grade_criteria, kb_grade_criteria_group,
+    kb_grade_students, kb_grade_students_group, kb_grade_score,
     kb_tws_teachers, kb_tws_classes, kb_tws_subjects, kb_tws_weekdays, kb_tws_view_slots,
 )

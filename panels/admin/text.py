@@ -44,6 +44,9 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for c in classes
         ]
         buttons.append([InlineKeyboardButton("➕ O'quvchi qo'shish", callback_data="adm_add_student")])
+        archived_all = db.get_archived_students(school_id)
+        if archived_all:
+            buttons.append([InlineKeyboardButton(f"📦 Arxivlangan o'quvchilar ({len(archived_all)} ta)", callback_data="adm_all_archived_students")])
         buttons.append([InlineKeyboardButton("🔙 Orqaga", callback_data="adm_main_menu")])
         await update.message.reply_text(
             f"👥 *{sname} — O'quvchilar:*\n\nSinf tanlang:",
@@ -96,6 +99,7 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("➕ O'qituvchi qo'shish",   callback_data="adm_add_teacher")],
                 [InlineKeyboardButton("📋 O'qituvchilar ro'yxati", callback_data="adm_list_teachers")],
                 [InlineKeyboardButton("🔗 O'qituvchini biriktirish", callback_data="adm_assign_teacher")],
+                [InlineKeyboardButton("👥 Sinf guruhlari", callback_data="adm_list_groups")],  # YANGI
                 [InlineKeyboardButton("🔙 Orqaga", callback_data="adm_main_menu")],
             ])
         )
@@ -170,11 +174,26 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "📊 Statistika":
         stats = db.get_school_stats(school_id)
+
+        # students_active/archived kalitlari bo'lmasa fallback
+        stu_active   = stats.get('students_active',   stats.get('students', 0))
+        stu_archived = stats.get('students_archived', 0)
+        tch_active   = stats.get('teachers_active',   stats.get('teachers', 0))
+        tch_archived = stats.get('teachers_archived', 0)
+
+        stu_line = f"👥 O'quvchilar: *{stu_active}* ta faol"
+        if stu_archived:
+            stu_line += f" | *{stu_archived}* ta arxivlangan"
+
+        tch_line = f"👨‍🏫 O'qituvchilar: *{tch_active}* ta faol"
+        if tch_archived:
+            tch_line += f" | *{tch_archived}* ta arxivlangan"
+
         await update.message.reply_text(
             f"📊 *{sname} — Statistika:*\n\n"
             f"🏫 Sinflar: *{stats['classes']}* ta\n"
-            f"👥 O'quvchilar: *{stats['students']}* ta\n"
-            f"👨‍🏫 O'qituvchilar: *{stats['teachers']}* ta\n"
+            f"{stu_line}\n"
+            f"{tch_line}\n"
             f"📚 Fanlar: *{stats['subjects']}* ta",
             parse_mode="Markdown"
         )

@@ -72,6 +72,16 @@ class UserRepo(BaseDB):
 
     # ── Arxiv tizimi ─────────────────────────────────────────────
 
+    def rename_student(self, telegram_id: int, new_name: str) -> bool:
+        with self.conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE whitelist SET full_name=%s WHERE telegram_id=%s",
+                    (new_name, telegram_id)
+                )
+            conn.commit()
+        return True
+
     def archive_student(self, telegram_id: int) -> bool:
         with self.conn() as conn:
             with conn.cursor() as cur:
@@ -94,6 +104,16 @@ class UserRepo(BaseDB):
                 WHERE w.school_id=%s AND w.is_active=0
                 ORDER BY c.name, w.full_name
             """, (school_id,))
+
+    def rename_teacher(self, teacher_id: int, new_name: str) -> bool:
+        with self.conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE teachers SET full_name=%s WHERE id=%s",
+                    (new_name, teacher_id)
+                )
+            conn.commit()
+        return True
 
     def archive_teacher(self, teacher_id: int) -> bool:
         with self.conn() as conn:

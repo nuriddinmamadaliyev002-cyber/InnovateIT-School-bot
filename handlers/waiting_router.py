@@ -44,6 +44,12 @@ WAITING_ROUTES = {
     "adm_lesson_content": "panels.admin.waiting",
     "adm_schedule_file":  "panels.admin.waiting",
     "adm_att_custom_date": "panels.admin.waiting",
+    "adm_group_name":     "panels.admin.waiting",  # YANGI: Sinf guruhi nomi
+    "adm_group_rename":   "panels.admin.waiting",  # YANGI: Guruh nomini o'zgartirish
+    "adm_parent_id":      "panels.admin.waiting",
+    "adm_parent_label":   "panels.admin.waiting",
+    "adm_rename_student": "panels.admin.waiting",
+    "adm_rename_teacher": "panels.admin.waiting",
     # Super Admin — barcha 'sup_' prefiksli waiting holatlar
     "sup_new_school":    "panels.super.waiting",
     "sup_rename_school": "panels.super.waiting",
@@ -54,6 +60,8 @@ WAITING_ROUTES = {
     "tch_extra_files":    "handlers.teacher.waiting",
     "tch_lesson_date":    "handlers.teacher.waiting",
     "tch_deadline":       "handlers.teacher.waiting",
+    "tch_hw_content_group": "handlers.teacher.waiting",  # YANGI: Guruhga vazifa
+    "tch_deadline_group": "handlers.teacher.waiting",    # YANGI: Guruh deadline
     "tws_time":           "handlers.teacher.waiting",
     "tws_edit_time":      "handlers.teacher.waiting",
     "tch_edit_content":   "handlers.teacher.waiting",
@@ -64,6 +72,8 @@ WAITING_ROUTES = {
     "tch_sub_cmt_file":   "handlers.teacher.waiting",
     # O'qituvchi davomati izoh
     "tadm_comment":       "handlers.teacher.waiting",
+    "tadm_hours_single":  "handlers.teacher.waiting",
+    "tadm_hours_global":  "handlers.teacher.waiting",
     "att_comment":         "handlers.teacher.waiting",
     # O'quvchi
     "homework_submission": "handlers.student.waiting",

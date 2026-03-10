@@ -8,32 +8,37 @@ from typing import List
 
 # Status tarjimalari
 STATUS_LABEL = {
-    "present":  "Keldi",
-    "absent":   "Kelmadi",
-    "late":     "Kech keldi",
-    "excused":  "Sababli",
+    "present":    "Keldi",
+    "absent":     "Kelmadi",
+    "late":       "Kech keldi",
+    "excused":    "Sababli",
+    "not_marked": "Dars o'tmagan",
 }
 STATUS_EMOJI = {
-    "present": "✅",
-    "absent":  "❌",
-    "late":    "⏰",
-    "excused": "📝",
+    "present":    "✅",
+    "absent":     "❌",
+    "late":       "⏰",
+    "excused":    "📝",
+    "not_marked": "⬜",
 }
 
 
 def _build_pivot(records) -> tuple:
     """
-    records: [{'full_name', 'date', 'status', 'comment'}, ...]
+    records: [{'full_name', 'date', 'status', 'comment', 'hours'}, ...]
     Returns:
         teachers  — tartiblangan ism ro'yxati
         dates     — tartiblangan sana ro'yxati
-        matrix    — { full_name: { date: (status, comment) } }
+        matrix    — { full_name: { date: (status, comment, hours) } }
     """
     teachers  = sorted({r['full_name'] for r in records})
     dates     = sorted({r['date']      for r in records})
     matrix    = {t: {} for t in teachers}
     for r in records:
-        matrix[r['full_name']][r['date']] = (r['status'] or 'present', r['comment'] or '')
+        status = r['status'] or 'present'
+        comment = r['comment'] or ''
+        hours = r.get('hours') or 0.0
+        matrix[r['full_name']][r['date']] = (status, comment, hours)
     return teachers, dates, matrix
 
 
@@ -57,13 +62,14 @@ def generate_attendance_excel(records: list, month: str, school_name: str) -> io
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     COLORS = {
-        "present": "C6EFCE",   # yashil
-        "absent":  "FFC7CE",   # qizil
-        "late":    "FFEB9C",   # sariq
-        "excused": "BDD7EE",   # ko'k
-        "header":  "4472C4",
-        "subhdr":  "D9E1F2",
-        "summary": "F2F2F2",
+        "present":    "C6EFCE",   # yashil
+        "absent":     "FFC7CE",   # qizil
+        "late":       "FFEB9C",   # sariq
+        "excused":    "BDD7EE",   # ko'k
+        "not_marked": "E0E0E0",   # kulrang — dars o'tmagan
+        "header":     "4472C4",
+        "subhdr":     "D9E1F2",
+        "summary":    "F2F2F2",
     }
 
     def fill(hex_color):
@@ -77,7 +83,7 @@ def generate_attendance_excel(records: list, month: str, school_name: str) -> io
             cell.fill  = fill(color)
 
     # ── Sarlavha ─────────────────────────────────────────────────
-    total_cols = 1 + len(dates) + 4   # ism + sanalar + 4 statistika ustuni
+    total_cols = 1 + len(dates) + 5   # ism + sanalar + 4 statistika + 1 jami soat
     ws.merge_cells(start_row=1, start_column=1,
                    end_row=1,   end_column=total_cols)
     c = ws.cell(row=1, column=1,
@@ -102,34 +108,53 @@ def generate_attendance_excel(records: list, month: str, school_name: str) -> io
         ws.row_dimensions[2].height = 30
 
     # Statistika header
-    for offset, label in enumerate(["✅", "❌", "⏰", "📝"], start=1):
+    for offset, label in enumerate(["✅", "❌", "⏰", "📝", "⬜"], start=1):
         c = ws.cell(row=2, column=1 + len(dates) + offset, value=label)
         cell_style(c, bold=True, color=COLORS['subhdr'])
         ws.column_dimensions[get_column_letter(1 + len(dates) + offset)].width = 6
+
+    # Jami soat header
+    c = ws.cell(row=2, column=1 + len(dates) + 6, value="⏱ Jami")
+    cell_style(c, bold=True, color=COLORS['subhdr'])
+    ws.column_dimensions[get_column_letter(1 + len(dates) + 6)].width = 10
 
     # ── Ma'lumotlar ───────────────────────────────────────────────
     for row_i, teacher in enumerate(teachers, start=3):
         c = ws.cell(row=row_i, column=1, value=teacher)
         cell_style(c, align='left')
 
-        counts = {"present": 0, "absent": 0, "late": 0, "excused": 0}
+        counts = {"present": 0, "absent": 0, "late": 0, "excused": 0, "not_marked": 0}
+        total_hours = 0.0
 
         for col_i, d in enumerate(dates, start=2):
-            status, comment = matrix[teacher].get(d, ('present', ''))
+            status, comment, hours = matrix[teacher].get(d, ('not_marked', '', 0.0))
             counts[status] = counts.get(status, 0) + 1
-            label = STATUS_EMOJI.get(status, "✅")
+            # Faqat kelgan va kech kelgan kunlardagi soatlar hisoblanadi
+            if status in ('present', 'late'):
+                total_hours += float(hours) if hours else 0.0
+
+            # Label: emoji + soat (agar bor bo'lsa) + izoh
+            label = STATUS_EMOJI.get(status, "⬜")
+            if hours and status in ('present', 'late'):
+                label += f"\n⏱{hours}s"
             if comment:
-                label += f"\n{comment[:20]}"
+                label += f"\n{comment[:15]}"
+
             c = ws.cell(row=row_i, column=col_i, value=label)
             cell_style(c, color=COLORS.get(status, "FFFFFF"))
 
         ws.row_dimensions[row_i].height = 18
 
-        # Statistika
-        for offset, key in enumerate(["present", "absent", "late", "excused"], start=1):
+        # Statistika: ✅ ❌ ⏰ 📝 ⬜
+        for offset, key in enumerate(["present", "absent", "late", "excused", "not_marked"], start=1):
             c = ws.cell(row=row_i, column=1 + len(dates) + offset,
                         value=counts.get(key, 0))
             cell_style(c, color=COLORS.get(key, "FFFFFF"))
+
+        # Jami soat
+        c = ws.cell(row=row_i, column=1 + len(dates) + 6,
+                    value=f"{total_hours:.1f} s")
+        cell_style(c, bold=True, color=COLORS['summary'])
 
     # ── Izoh jadval ───────────────────────────────────────────────
     foot_row = 3 + len(teachers) + 1
@@ -180,45 +205,60 @@ def generate_attendance_pdf(records: list, month: str, school_name: str) -> io.B
 
     teachers, dates, matrix = _build_pivot(records)
 
-    # Pivot jadvali — ustunlar: ism | sana | sana | ... | jami
+    # Pivot jadvali — ustunlar: ism | sana | sana | ... | jami soat | ✅ | ❌ | ⏰ | 📝 | ⬜
     header_row = ["O'qituvchi"] + [
         datetime.strptime(d, "%Y-%m-%d").strftime("%d.%m") for d in dates
-    ] + ["✅", "❌", "⏰", "📝"]
+    ] + ["⏱ Jami", "✅", "❌", "⏰", "📝", "⬜"]
 
     table_data = [header_row]
 
     STATUS_COLOR_RL = {
-        "present": colors.HexColor("#C6EFCE"),
-        "absent":  colors.HexColor("#FFC7CE"),
-        "late":    colors.HexColor("#FFEB9C"),
-        "excused": colors.HexColor("#BDD7EE"),
+        "present":    colors.HexColor("#C6EFCE"),
+        "absent":     colors.HexColor("#FFC7CE"),
+        "late":       colors.HexColor("#FFEB9C"),
+        "excused":    colors.HexColor("#BDD7EE"),
+        "not_marked": colors.HexColor("#E0E0E0"),
     }
 
     cell_cmds = []   # TableStyle commands (bg color per cell)
 
     for row_i, teacher in enumerate(teachers, start=1):
         counts = {k: 0 for k in STATUS_LABEL}
+        total_hours = 0.0
         row    = [teacher]
         for col_i, d in enumerate(dates, start=1):
-            status, comment = matrix[teacher].get(d, ('present', ''))
+            status, comment, hours = matrix[teacher].get(d, ('not_marked', '', 0.0))
             counts[status] = counts.get(status, 0) + 1
-            label = STATUS_EMOJI.get(status, "✅")
+            # Faqat kelgan va kech kelgan kunlardagi soatlar hisoblanadi
+            if status in ('present', 'late'):
+                total_hours += float(hours) if hours else 0.0
+
+            label = STATUS_EMOJI.get(status, "⬜")
+            if hours and status in ('present', 'late'):
+                label += f"\n⏱{hours}s"
             if comment:
-                label += f"\n{comment[:15]}"
+                label += f"\n{comment[:12]}"
             row.append(label)
             # Hujayra rangi
             cell_cmds.append(
                 ('BACKGROUND', (col_i, row_i), (col_i, row_i),
                  STATUS_COLOR_RL.get(status, colors.white))
             )
-        row += [counts['present'], counts['absent'], counts['late'], counts['excused']]
+        # Jami soat + statistika
+        row.append(f"{total_hours:.1f}s")
+        row += [
+            counts['present'], counts['absent'],
+            counts['late'],    counts['excused'],
+            counts['not_marked']
+        ]
         table_data.append(row)
 
-    # Ustun kengliklari
-    name_w   = 5.5 * cm
-    date_w   = 1.1 * cm
-    stat_w   = 0.9 * cm
-    col_widths = [name_w] + [date_w] * len(dates) + [stat_w] * 4
+    # Ustun kengliklari: ism | sanalar | jami soat | 5 statistika
+    name_w   = 5.0 * cm
+    date_w   = 1.0 * cm
+    hour_w   = 1.2 * cm
+    stat_w   = 0.8 * cm
+    col_widths = [name_w] + [date_w] * len(dates) + [hour_w] + [stat_w] * 5
 
     tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
     tbl.setStyle(TableStyle([
@@ -242,7 +282,7 @@ def generate_attendance_pdf(records: list, month: str, school_name: str) -> io.B
     # Izoh
     legend_data = [["Belgi", "Ma'no"]] + [
         [f"{STATUS_EMOJI[k]} {STATUS_LABEL[k]}", ""]
-        for k in STATUS_LABEL
+        for k in ["present", "absent", "late", "excused", "not_marked"]
     ]
     legend = Table(legend_data, colWidths=[4*cm, 3*cm])
     legend.setStyle(TableStyle([

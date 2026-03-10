@@ -86,6 +86,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=kb_teacher_files()
         )
         return
+    
+    if data == "tch_deadline_group_skip":
+        group_id = context.user_data.get('tmp_group_id')
+        group = db.get_group(group_id)
+        
+        await query.edit_message_text(
+            f"✅ *Tayyor!*\n\n"
+            f"👥 Guruh: *{group['group_name']}*\n"
+            f"⏰ Deadline: _belgilanmagan_\n\n"
+            f"_Barcha sinflarga vazifa yuborildi._",
+            parse_mode="Markdown"
+        )
+        
+        # Tozalash
+        context.user_data.pop('waiting_for', None)
+        context.user_data.pop('tmp_lesson_ids', None)
+        context.user_data.pop('tmp_group_id', None)
+        context.user_data.pop('teacher_group', None)
+        return
 
     if data == "back_main":
         context.user_data.pop("waiting_for", None)
@@ -164,7 +183,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Baholash ─────────────────────────────────────────────────
-    if data.startswith(("grade_", "grade_hist")):
+    if data.startswith(("grade_", "grade_hist", "grade_group_", "grade_gcrit_", "grade_gdate_", "grade_date_")):
         from handlers.teacher.callbacks import handle_grading_callback
         await handle_grading_callback(query, context, data, user_id)
         return
@@ -184,7 +203,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── O'qituvchi: dars, mavzu, topshirmalar, baho ───────────────
     if data.startswith((
         "tch_class_",     "tch_sub_class_",   "tch_sub_subj_",
-        "tch_sub_lesson_",                      "tch_subj_",
+        "tch_sub_lesson_", "tch_sub_group_",   "tch_subj_",
+        "tch_group_",     "tch_group_date_",
         "tch_date_",      "tch_hw_",            "tch_edit_date_",
         "tch_lesson_",    "tch_topic_",         "tch_att_",
         "tch_grade_",     "view_sub_",          "vsub_",

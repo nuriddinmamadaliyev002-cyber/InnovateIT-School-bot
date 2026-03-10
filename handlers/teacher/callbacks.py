@@ -18,7 +18,9 @@ from config import db, ATTENDANCE_EMOJI, ATTENDANCE_LABEL, CRITERIA_LABELS, SCOR
 from utils.keyboards import kb_cancel
 from utils.keyboards import (
     kb_cancel_teacher, kb_teacher_subjects, kb_dates,
-    kb_grade_criteria, kb_grade_students, kb_grade_score,
+    kb_grade_dates,
+    kb_grade_criteria, kb_grade_criteria_group,
+    kb_grade_students, kb_grade_students_group, kb_grade_score,
     kb_tws_teachers, kb_tws_classes, kb_tws_subjects, kb_tws_weekdays, kb_tws_view_slots,
     kb_teacher_attendance, kb_teacher_att_dates,
 )
@@ -132,9 +134,39 @@ async def handle_grading_callback(query, context: ContextTypes.DEFAULT_TYPE,
     if not teacher:
         return
 
-    if data.startswith("grade_class_"):
+    if data.startswith("grade_group_"):
+        # Guruh tanlandi — avval sana tanlash
+        group_id   = int(data.split("_")[-1])
+        group      = db.get_group(group_id)
+        if not group:
+            await query.edit_message_text("❌ Guruh topilmadi.")
+            return
+        subject_id = group['subject_id']
+        context.user_data['grade_group_id']   = group_id
+        context.user_data['grade_subject_id'] = subject_id
+        context.user_data.pop('grade_class_id', None)
+
+        # Dars sanalari
+        dates = db.get_teacher_group_dates(teacher['id'], group_id)
+        if not dates:
+            await query.edit_message_text(
+                f"⭐ Baholash | 👥 *{group['group_name']}*\n\n"
+                f"⚠️ Haftalik jadvalda dars sanasi topilmadi.\n"
+                f"Avval haftalik jadval kiriting.",
+                parse_mode="Markdown"
+            )
+            return
+        await query.edit_message_text(
+            f"⭐ Baholash | 👥 *{group['group_name']}* ({group['subject_name']})\n\n"
+            f"📅 Sana tanlang:",
+            parse_mode="Markdown",
+            reply_markup=kb_grade_dates(dates, prefix="grade_gdate_")
+        )
+
+    elif data.startswith("grade_class_"):
         class_id = int(data.split("_")[-1])
         context.user_data['grade_class_id'] = class_id
+        context.user_data.pop('grade_group_id', None)
         subjects = db.get_teacher_subjects_for_class(teacher['id'], class_id)
         cls = db.get_class(class_id)
         btns = [
@@ -152,9 +184,59 @@ async def handle_grading_callback(query, context: ContextTypes.DEFAULT_TYPE,
         subject_id = int(data.split("_")[-1])
         class_id   = context.user_data.get('grade_class_id')
         context.user_data['grade_subject_id'] = subject_id
+        # Sana tanlash
+        dates = db.get_teacher_class_subject_dates(teacher['id'], class_id, subject_id)
+        cls   = db.get_class(class_id)
+        subj  = db.get_subject(subject_id)
+        if not dates:
+            await query.edit_message_text(
+                f"⭐ Baholash | 🏫 *{cls['name']} — {subj['name']}*\n\n"
+                f"⚠️ Haftalik jadvalda dars sanasi topilmadi.\n"
+                f"Avval haftalik jadval kiriting.",
+                parse_mode="Markdown"
+            )
+            return
         await query.edit_message_text(
-            "⭐ Baholash — Kriteriya tanlang:",
-            reply_markup=kb_grade_criteria(class_id, subject_id)
+            f"⭐ Baholash | 🏫 *{cls['name']} — {subj['name']}*\n\n"
+            f"📅 Sana tanlang:",
+            parse_mode="Markdown",
+            reply_markup=kb_grade_dates(dates, prefix=f"grade_date_{class_id}_{subject_id}_")
+        )
+
+    elif data.startswith("grade_date_"):
+        # Sinf sana tanlash: grade_date_{class_id}_{subject_id}_{YYYY-MM-DD}
+        rest       = data[len("grade_date_"):]
+        date_str   = rest[-10:]
+        ids_part   = rest[:-11]
+        parts      = ids_part.split("_")
+        class_id   = int(parts[0])
+        subject_id = int(parts[1])
+        context.user_data['grade_class_id']   = class_id
+        context.user_data['grade_subject_id'] = subject_id
+        context.user_data['grade_date']       = date_str
+        cls  = db.get_class(class_id)
+        subj = db.get_subject(subject_id)
+        d_fmt = date_str[8:10] + "." + date_str[5:7] + "." + date_str[:4]
+        await query.edit_message_text(
+            f"⭐ Baholash | 🏫 *{cls['name']} — {subj['name']}*\n"
+            f"📅 Sana: *{d_fmt}*\n\nKriteriya tanlang:",
+            parse_mode="Markdown",
+            reply_markup=kb_grade_criteria(class_id, subject_id, show_history=False)
+        )
+
+    elif data.startswith("grade_gdate_"):
+        # Guruh sana tanlash: grade_gdate_{YYYY-MM-DD}
+        date_str   = data[len("grade_gdate_"):]
+        group_id   = context.user_data.get('grade_group_id')
+        subject_id = context.user_data.get('grade_subject_id')
+        context.user_data['grade_date'] = date_str
+        group = db.get_group(group_id)
+        d_fmt = date_str[8:10] + "." + date_str[5:7] + "." + date_str[:4]
+        await query.edit_message_text(
+            f"⭐ Baholash | 👥 *{group['group_name']}* ({group['subject_name']})\n"
+            f"📅 Sana: *{d_fmt}*\n\nKriteriya tanlang:",
+            parse_mode="Markdown",
+            reply_markup=kb_grade_criteria_group(group_id, subject_id, show_history=False)
         )
 
     elif data.startswith("grade_crit_"):
@@ -178,6 +260,48 @@ async def handle_grading_callback(query, context: ContextTypes.DEFAULT_TYPE,
             reply_markup=kb_grade_students(students, grades, class_id, subject_id, criteria, today)
         )
 
+    elif data.startswith("grade_gcrit_"):
+        # Guruh kriteriyasi: grade_gcrit_{group_id}_{subject_id}_{criteria}
+        parts      = data.replace("grade_gcrit_", "").split("_")
+        group_id   = int(parts[0])
+        subject_id = int(parts[1])
+        criteria   = parts[2]
+        today = context.user_data.get('grade_date') or date.today().isoformat()
+        context.user_data.update({
+            'grade_group_id':  group_id,
+            'grade_subject_id': subject_id,
+            'grade_criteria':  criteria,
+            'grade_date':      today,
+            'grade_scores':    {},
+        })
+        context.user_data.pop('grade_class_id', None)
+        # Guruhning barcha sinflaridagi o'quvchilarni yig'amiz
+        class_ids = db.get_group_class_ids(group_id)
+        students = []
+        for cid in class_ids:
+            cls_students = db.get_whitelist_by_class(cid)
+            for s in cls_students:
+                s['_class_id'] = cid  # keyinchalik save uchun
+            students.extend(cls_students)
+        # Mavjud baholarni olish (har bir sinf uchun)
+        grades = {}
+        for cid in class_ids:
+            existing = db.get_grades_for_class(cid, subject_id, criteria, today)
+            for r in existing:
+                grades[r['student_id']] = r['score']
+        context.user_data['grade_scores'] = grades
+        context.user_data['grade_group_students'] = [
+            {'telegram_id': s['telegram_id'], 'full_name': s['full_name'], 'class_id': s['_class_id']}
+            for s in students
+        ]
+        group = db.get_group(group_id)
+        await query.edit_message_text(
+            f"⭐ *{CRITERIA_LABELS.get(criteria, criteria)}* | 👥 {group['group_name']}\n"
+            f"O'quvchi tanlang:",
+            parse_mode="Markdown",
+            reply_markup=kb_grade_students_group(students, grades, group_id, subject_id, criteria, today)
+        )
+
     elif data.startswith("grade_student_"):
         student_id = int(data.split("_")[-1])
         context.user_data['grade_current_student'] = student_id
@@ -189,23 +313,33 @@ async def handle_grading_callback(query, context: ContextTypes.DEFAULT_TYPE,
         )
 
     elif data.startswith("grade_score_"):
-        parts    = data.replace("grade_score_", "").split("_")
+        parts      = data.replace("grade_score_", "").split("_")
         student_id = int(parts[0])
         score      = int(parts[1])
         grades = context.user_data.get('grade_scores', {})
         grades[student_id] = score
         context.user_data['grade_scores'] = grades
         # O'quvchilar ro'yxatiga qayt
+        group_id   = context.user_data.get('grade_group_id')
         class_id   = context.user_data.get('grade_class_id')
         subject_id = context.user_data.get('grade_subject_id')
         criteria   = context.user_data.get('grade_criteria')
         today      = context.user_data.get('grade_date')
-        students   = db.get_whitelist_by_class(class_id)
-        await query.edit_message_text(
-            f"⭐ *{CRITERIA_LABELS.get(criteria, criteria)}* — O'quvchi tanlang:",
-            parse_mode="Markdown",
-            reply_markup=kb_grade_students(students, grades, class_id, subject_id, criteria, today)
-        )
+        if group_id:
+            group_students = context.user_data.get('grade_group_students', [])
+            group = db.get_group(group_id)
+            await query.edit_message_text(
+                f"⭐ *{CRITERIA_LABELS.get(criteria, criteria)}* | 👥 {group['group_name']}\nO'quvchi tanlang:",
+                parse_mode="Markdown",
+                reply_markup=kb_grade_students_group(group_students, grades, group_id, subject_id, criteria, today)
+            )
+        else:
+            students = db.get_whitelist_by_class(class_id)
+            await query.edit_message_text(
+                f"⭐ *{CRITERIA_LABELS.get(criteria, criteria)}* — O'quvchi tanlang:",
+                parse_mode="Markdown",
+                reply_markup=kb_grade_students(students, grades, class_id, subject_id, criteria, today)
+            )
 
     elif data.startswith("grade_history_"):
         # Eski baholarni o'zgartirish — sana tanlash
@@ -243,22 +377,40 @@ async def handle_grading_callback(query, context: ContextTypes.DEFAULT_TYPE,
         context.user_data['grade_date'] = date_str
 
     elif data in ("grade_save_back", "grade_back_to_list"):
+        group_id   = context.user_data.get('grade_group_id')
         class_id   = context.user_data.get('grade_class_id')
         subject_id = context.user_data.get('grade_subject_id')
         criteria   = context.user_data.get('grade_criteria')
         today      = context.user_data.get('grade_date')
         grades     = context.user_data.get('grade_scores', {})
-        for student_id, score in grades.items():
-            db.save_grade(student_id, teacher['id'], subject_id, class_id, criteria, score, today)
-        # Kriteriya tanlash menyusiga qaytish
-        subj = db.get_subject(subject_id)
-        cls  = db.get_class(class_id)
-        await query.edit_message_text(
-            f"✅ *{CRITERIA_LABELS.get(criteria, criteria)}* — baholar saqlandi!\n\n"
-            f"⭐ *{cls['name']} — {subj['name']}*\nBoshqa kriteriyani tanlang:",
-            parse_mode="Markdown",
-            reply_markup=kb_grade_criteria(class_id, subject_id)
-        )
+
+        if group_id:
+            # Guruh rejimi — har bir o'quvchining o'z class_id si bilan saqlaymiz
+            group_students = context.user_data.get('grade_group_students', [])
+            student_class  = {s['telegram_id']: s['class_id'] for s in group_students}
+            for student_id, score in grades.items():
+                cid = student_class.get(int(student_id), class_id)
+                db.save_grade(int(student_id), teacher['id'], subject_id, cid, criteria, score, today)
+            group = db.get_group(group_id)
+            subj  = db.get_subject(subject_id)
+            await query.edit_message_text(
+                f"✅ *{CRITERIA_LABELS.get(criteria, criteria)}* — baholar saqlandi!\n\n"
+                f"⭐ 👥 *{group['group_name']} — {subj['name']}*\nBoshqa kriteriyani tanlang:",
+                parse_mode="Markdown",
+                reply_markup=kb_grade_criteria_group(group_id, subject_id)
+            )
+        else:
+            # Oddiy sinf rejimi
+            for student_id, score in grades.items():
+                db.save_grade(student_id, teacher['id'], subject_id, class_id, criteria, score, today)
+            subj = db.get_subject(subject_id)
+            cls  = db.get_class(class_id)
+            await query.edit_message_text(
+                f"✅ *{CRITERIA_LABELS.get(criteria, criteria)}* — baholar saqlandi!\n\n"
+                f"⭐ *{cls['name']} — {subj['name']}*\nBoshqa kriteriyani tanlang:",
+                parse_mode="Markdown",
+                reply_markup=kb_grade_criteria(class_id, subject_id)
+            )
 
 
 # ══════════════════════════════════════════════════════════
@@ -484,20 +636,55 @@ async def handle_tws_callback(query, context: ContextTypes.DEFAULT_TYPE,
             )
         else:
             classes = db.get_teacher_classes(teacher_id)
+            groups  = db.get_teacher_groups(teacher_id)
             await query.edit_message_text(
-                "🏫 Sinf tanlang:",
-                reply_markup=kb_tws_classes(classes)
+                "🏫 *Sinf yoki guruh tanlang:*",
+                parse_mode="Markdown",
+                reply_markup=kb_tws_classes(classes, groups)
             )
 
     elif data.startswith("tws_add_slot_"):
         teacher_id = int(data.split("_")[-1])
         context.user_data['tws_teacher_id'] = teacher_id
         classes = db.get_teacher_classes(teacher_id)
-        await query.edit_message_text("🏫 Sinf tanlang:", reply_markup=kb_tws_classes(classes))
+        groups  = db.get_teacher_groups(teacher_id)
+        await query.edit_message_text(
+            "🏫 *Sinf yoki guruh tanlang:*",
+            parse_mode="Markdown",
+            reply_markup=kb_tws_classes(classes, groups)
+        )
+
+    elif data == "tws_back_classes":
+        teacher_id = context.user_data.get('tws_teacher_id')
+        classes = db.get_teacher_classes(teacher_id)
+        groups  = db.get_teacher_groups(teacher_id)
+        await query.edit_message_text(
+            "🏫 *Sinf yoki guruh tanlang:*",
+            parse_mode="Markdown",
+            reply_markup=kb_tws_classes(classes, groups)
+        )
+
+    # ── tws_group_{id} — Guruh tanlandi → fan → kun ──────────────
+    elif data.startswith("tws_group_"):
+        group_id   = int(data.split("_")[-1])
+        teacher_id = context.user_data.get('tws_teacher_id')
+        group      = db.get_group(group_id)
+        if not group:
+            await query.edit_message_text("❌ Guruh topilmadi.")
+            return
+        context.user_data['tws_group_id'] = group_id
+        # Guruh subject_id si bitta — shu fan uchun kun tanlanadi
+        subjects = [{'id': group['subject_id'], 'name': group['subject_name']}]
+        await query.edit_message_text(
+            f"👥 *{group['group_name']}* — Fan tanlang:",
+            parse_mode="Markdown",
+            reply_markup=kb_tws_subjects(subjects)
+        )
 
     elif data.startswith("tws_class_"):
         class_id = int(data.split("_")[-1])
         context.user_data['tws_class_id'] = class_id
+        context.user_data.pop('tws_group_id', None)
         teacher_id = context.user_data.get('tws_teacher_id')
         subjects = db.get_teacher_subjects_for_class(teacher_id, class_id)
         await query.edit_message_text("📚 Fan tanlang:", reply_markup=kb_tws_subjects(subjects))
@@ -507,13 +694,29 @@ async def handle_tws_callback(query, context: ContextTypes.DEFAULT_TYPE,
         context.user_data['tws_subject_id'] = subject_id
         teacher_id = context.user_data.get('tws_teacher_id')
         class_id   = context.user_data.get('tws_class_id')
+        group_id   = context.user_data.get('tws_group_id')
+
         existing_slots = db.get_slots(teacher_id=teacher_id)
-        existing_days = {s['weekday'] for s in existing_slots
-                         if s['class_id'] == class_id and s['subject_id'] == subject_id}
+
+        if group_id:
+            # Guruh rejimi — guruhdagi barcha sinflar uchun mavjud kunlarni yig'amiz
+            group_class_ids = set(db.get_group_class_ids(group_id))
+            existing_days = {s['weekday'] for s in existing_slots
+                             if s['class_id'] in group_class_ids and s['subject_id'] == subject_id}
+            group = db.get_group(group_id)
+            label = f"👥 {group['group_name']}"
+        else:
+            existing_days = {s['weekday'] for s in existing_slots
+                             if s['class_id'] == class_id and s['subject_id'] == subject_id}
+            cls   = db.get_class(class_id)
+            label = f"🏫 {cls['name']}"
+
         context.user_data['tws_existing_days'] = existing_days
         context.user_data['tws_selected_days'] = set()
+        subj = db.get_subject(subject_id)
         await query.edit_message_text(
-            "📅 Dars kunlarini tanlang:",
+            f"{label} | 📚 *{subj['name']}*\n\n📅 Dars kunlarini tanlang:",
+            parse_mode="Markdown",
             reply_markup=kb_tws_weekdays(existing_days, set())
         )
 
@@ -586,27 +789,30 @@ async def handle_tws_callback(query, context: ContextTypes.DEFAULT_TYPE,
 # ══════════════════════════════════════════════════════════
 
 def _tadm_teachers_data(context) -> list:
-    """context dagi tadm_data, tadm_comments → teachers_data ro'yxatini qaytaradi"""
-    teacher_ids  = context.user_data.get('tadm_teachers', [])
-    tadm_data    = context.user_data.get('tadm_data', {})
+    """context dagi tadm_data, tadm_comments, tadm_hours_data → teachers_data ro'yxatini qaytaradi"""
+    teacher_ids   = context.user_data.get('tadm_teachers', [])
+    tadm_data     = context.user_data.get('tadm_data', {})
     tadm_comments = context.user_data.get('tadm_comments', {})
+    tadm_hours    = context.user_data.get('tadm_hours_data', {})
     teachers_raw = [db.get_teacher_by_id(tid) for tid in teacher_ids]
     return [
         {
-            'id':       t['id'],
+            'id':        t['id'],
             'full_name': t['full_name'],
-            'status':   tadm_data.get(str(t['id']), 'present'),
-            'comment':  tadm_comments.get(str(t['id']), ''),
+            'status':    tadm_data.get(str(t['id']), 'present'),
+            'comment':   tadm_comments.get(str(t['id']), ''),
+            'hours':     tadm_hours.get(str(t['id'])),
         }
         for t in teachers_raw if t
     ]
 
 
 async def _refresh_tadm_keyboard(query, context):
-    """Davomat klaviaturasini yangilaydi"""
+    """Davomat klaviaturasini yangilaydi (tahrir rejimida)"""
     date_str      = context.user_data.get('tadm_date', '')
     teachers_data = _tadm_teachers_data(context)
     tadm_data     = context.user_data.get('tadm_data', {})
+    editing_id    = context.user_data.get('tadm_editing_id')
 
     # Hamma belgilanganmi?
     all_done = all(
@@ -621,9 +827,10 @@ async def _refresh_tadm_keyboard(query, context):
     header_icon = "✅ " if (total > 0 and non_default_count == total) else "📋 "
 
     await query.edit_message_text(
-        f"{header_icon}*O'qituvchilar davomati* | 📅 {date_str}",
+        f"{header_icon}*O'qituvchilar davomati* | 📅 {date_str}\n"
+        f"_(✅ Keldi | ❌ Kelmadi | ⏰ Kech keldi | 📝 Sababli)_",
         parse_mode="Markdown",
-        reply_markup=kb_teacher_attendance(teachers_data)
+        reply_markup=kb_teacher_attendance(teachers_data, is_saved=False, editing_id=editing_id)
     )
 
 
@@ -652,31 +859,47 @@ async def handle_tadm_callback(query, context: ContextTypes.DEFAULT_TYPE,
                 ]])
             )
             return
-        existing = {r['teacher_id']: r['status'] for r in db.get_teacher_attendance(school_id, date_str)}
+        # Mavjud davomat ma'lumotlarini yuklash
+        attendance_records = db.get_teacher_attendance(school_id, date_str)
+        existing = {r['teacher_id']: r['status'] for r in attendance_records}
         existing_comments = {
             r['teacher_id']: r['comment']
-            for r in db.get_teacher_attendance(school_id, date_str)
+            for r in attendance_records
             if r.get('comment')
+        }
+        existing_hours = {
+            r['teacher_id']: r['hours']
+            for r in attendance_records
+            if r.get('hours')
         }
         tadm_data = {str(t['id']): existing.get(t['id'], 'present') for t in teachers}
         tadm_comments = {str(t['id']): existing_comments.get(t['id'], '') for t in teachers}
+        tadm_hours = {str(t['id']): existing_hours.get(t['id']) for t in teachers}
 
-        context.user_data['tadm_date']     = date_str
-        context.user_data['tadm_data']     = tadm_data
-        context.user_data['tadm_comments'] = tadm_comments
-        context.user_data['tadm_teachers'] = [t['id'] for t in teachers]
+        context.user_data['tadm_date']       = date_str
+        context.user_data['tadm_data']       = tadm_data
+        context.user_data['tadm_comments']   = tadm_comments
+        context.user_data['tadm_hours_data'] = tadm_hours
+        context.user_data['tadm_teachers']   = [t['id'] for t in teachers]
+        context.user_data['tadm_school_id']  = school_id
 
         teachers_data = [
             {'id': t['id'], 'full_name': t['full_name'],
              'status': tadm_data.get(str(t['id']), 'present'),
-             'comment': tadm_comments.get(str(t['id']), '')}
+             'comment': tadm_comments.get(str(t['id']), ''),
+             'hours': tadm_hours.get(str(t['id']))}
             for t in teachers
         ]
+        
+        # Agar davomat saqlangan bo'lsa (attendance_records mavjud), is_saved=True
+        is_saved = len(attendance_records) > 0
+        editing_id = context.user_data.get('tadm_editing_id')
+        
         await query.edit_message_text(
             f"📋 *O'qituvchilar davomati* | 📅 {date_str}\n"
             f"_(✅ Keldi | ❌ Kelmadi | ⏰ Kech keldi | 📝 Sababli)_",
             parse_mode="Markdown",
-            reply_markup=kb_teacher_attendance(teachers_data)
+            reply_markup=kb_teacher_attendance(teachers_data, is_saved=is_saved, editing_id=editing_id)
         )
 
     # ── Toggle ────────────────────────────────────────────────────
@@ -746,23 +969,59 @@ async def handle_tadm_callback(query, context: ContextTypes.DEFAULT_TYPE,
         context.user_data['tadm_data'] = tadm_data
         await _refresh_tadm_keyboard(query, context)
 
-    # ── Saqlash ───────────────────────────────────────────────────
-    elif data == "tadm_save":
-        date_str      = context.user_data.get('tadm_date')
+    # ── Bitta o'qituvchini tahrirlash ─────────────────────────────
+    elif data.startswith("tadm_edit_one_"):
+        teacher_id = int(data.split("_")[-1])
+        context.user_data['tadm_editing_id'] = teacher_id
+        await _refresh_tadm_keyboard(query, context)
+
+    # ── Bitta o'qituvchini saqlash ────────────────────────────────
+    elif data.startswith("tadm_save_one_"):
+        teacher_id = int(data.split("_")[-1])
         tadm_data     = context.user_data.get('tadm_data', {})
         tadm_comments = context.user_data.get('tadm_comments', {})
+        
+        status  = tadm_data.get(str(teacher_id), 'present')
+        comment = tadm_comments.get(str(teacher_id), '')
+        
+        # Validatsiya: izoh majburiy (late/excused)
+        if status in ('late', 'excused') and not comment.strip():
+            teacher = db.get_teacher_by_id(teacher_id)
+            t_name = teacher['full_name'] if teacher else str(teacher_id)
+            await query.answer(
+                f"⚠️ {t_name} uchun izoh yozilmagan!", show_alert=True
+            )
+            return
+        
+        # Soat HAR SAFAR so'raladi (present/late statusida)
+        if status in ('present', 'late'):
+            teacher = db.get_teacher_by_id(teacher_id)
+            t_name = teacher['full_name'] if teacher else str(teacher_id)
+            # Soat so'raymiz
+            context.user_data['tadm_pending_tid'] = teacher_id
+            context.user_data['waiting_for']      = 'tadm_hours_single_save'
+            await query.edit_message_text(
+                f"⏱ *{t_name} — Necha soat dars o'tdi?*\n\n"
+                f"_Son kiriting (masalan: 6 yoki 5.5)_",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("❌ Bekor", callback_data=f"tadm_undo_{teacher_id}")
+                ]])
+            )
+            return
+        
+        # Faqat absent/excused statuslari uchun soatsiz saqlash
+        date_str = context.user_data.get('tadm_date')
         if date_str:
-            db.save_teacher_attendance(school_id, date_str, tadm_data, tadm_comments)
-        for k in ('tadm_data', 'tadm_comments', 'tadm_teachers',
-                  'tadm_date', 'tadm_pending_tid', 'tadm_pending_status'):
-            context.user_data.pop(k, None)
-        await query.edit_message_text(
-            "✅ *O'qituvchilar davomati saqlandi!*",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔙 Sanalar", callback_data="tadm_back_dates")
-            ]])
-        )
+            # Faqat bitta o'qituvchini saqlash (soatsiz)
+            single_data = {str(teacher_id): status}
+            single_comments = {str(teacher_id): comment} if comment else {}
+            db.save_teacher_attendance(school_id, date_str, single_data, single_comments, hours=None)
+        
+        # Tahrir rejimidan chiqish
+        context.user_data.pop('tadm_editing_id', None)
+        await query.answer("✅ Saqlandi", show_alert=False)
+        await _refresh_tadm_keyboard(query, context)
 
     # ── Sanalar menyusiga qaytish ─────────────────────────────────
     elif data == "tadm_back_dates":
@@ -789,11 +1048,64 @@ async def handle_tadm_callback(query, context: ContextTypes.DEFAULT_TYPE,
             ])
         )
 
-    # ── Export format tanlash ─────────────────────────────────────
+    # ── Export format tanlash + Statistika ────────────────────────
     elif data.startswith("tadm_export_menu_"):
         month = data.replace("tadm_export_menu_", "")
+
+        # To'liq hisobot: davomat yozilgan + dars bo'lib yozilmagan kunlar
+        records = db.get_teacher_monthly_full_report(school_id, month)
+
+        if not records:
+            await query.edit_message_text(
+                f"❌ *{month}* uchun davomat ma'lumoti yo'q.\n"
+                f"_Haftalik jadval kiritilmagan bo'lishi mumkin._",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Orqaga", callback_data="tadm_monthly_menu")
+                ]])
+            )
+            return
+
+        # Har bir o'qituvchi uchun statistika
+        teacher_stats = {}
+        for r in records:
+            tid = r['teacher_id']
+            if tid not in teacher_stats:
+                teacher_stats[tid] = {
+                    'full_name': r['full_name'],
+                    'present': 0, 'absent': 0,
+                    'late': 0, 'excused': 0, 'not_marked': 0,
+                    'total_hours': 0.0
+                }
+            st = r['status'] or 'not_marked'
+            teacher_stats[tid][st] = teacher_stats[tid].get(st, 0) + 1
+            # Faqat kelgan va kech kelgan kunlardagi soatlar hisoblanadi
+            hours = r.get('hours') or 0.0
+            if st in ('present', 'late'):
+                teacher_stats[tid]['total_hours'] += float(hours) if hours else 0.0
+
+        # Statistika matni
+        stat_text = f"📊 *{month} — O'qituvchilar statistikasi*\n\n"
+        for tid, s in sorted(teacher_stats.items(), key=lambda x: x[1]['full_name']):
+            stat_text += f"👨‍🏫 *{s['full_name']}*\n"
+            stat_text += f"   ✅ Keldi: *{s['present']}* kun\n"
+            if s['absent']:
+                stat_text += f"   ❌ Kelmadi: *{s['absent']}* kun\n"
+            if s['late']:
+                stat_text += f"   ⏰ Kech keldi: *{s['late']}* kun\n"
+            if s['excused']:
+                stat_text += f"   📝 Sababli: *{s['excused']}* kun\n"
+            if s['not_marked']:
+                stat_text += f"   ⬜ Dars o'tmagan: *{s['not_marked']}* kun\n"
+            if s['total_hours']:
+                stat_text += f"   ⏱ Jami: *{s['total_hours']:.1f}* soat\n"
+            stat_text += "\n"
+
+        stat_text += "_Yuklab olish uchun format tanlang:_"
+
+        context.user_data['tadm_export_month'] = month
         await query.edit_message_text(
-            f"📥 *{month}* — format tanlang:",
+            stat_text,
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📊 Excel (.xlsx)", callback_data=f"tadm_xl_{month}")],
@@ -806,7 +1118,7 @@ async def handle_tadm_callback(query, context: ContextTypes.DEFAULT_TYPE,
     elif data.startswith("tadm_xl_"):
         month = data.replace("tadm_xl_", "")
         await query.answer("📊 Excel tayyorlanmoqda...")
-        records = db.get_teacher_monthly_attendance(school_id, month)
+        records = db.get_teacher_monthly_full_report(school_id, month)
         if not records:
             await query.edit_message_text(f"❌ *{month}* uchun davomat ma'lumoti yo'q.", parse_mode="Markdown")
             return
@@ -825,7 +1137,7 @@ async def handle_tadm_callback(query, context: ContextTypes.DEFAULT_TYPE,
     elif data.startswith("tadm_pdf_"):
         month = data.replace("tadm_pdf_", "")
         await query.answer("📄 PDF tayyorlanmoqda...")
-        records = db.get_teacher_monthly_attendance(school_id, month)
+        records = db.get_teacher_monthly_full_report(school_id, month)
         if not records:
             await query.edit_message_text(f"❌ *{month}* uchun davomat ma'lumoti yo'q.", parse_mode="Markdown")
             return
@@ -879,6 +1191,7 @@ async def handle_teacher_callback(query, context: ContextTypes.DEFAULT_TYPE,
         class_id = int(data.split("_")[-1])
         cls      = db.get_class(class_id)
         context.user_data['sub_view_class_id'] = class_id
+        context.user_data.pop('sub_view_group_id', None)
 
         subjects = db.get_teacher_subjects_for_class(teacher['id'], class_id)
         if not subjects:
@@ -902,65 +1215,187 @@ async def handle_teacher_callback(query, context: ContextTypes.DEFAULT_TYPE,
             reply_markup=InlineKeyboardMarkup(btns)
         )
 
-    # ── tch_sub_subj_{id} — Fan tanlandi → darslar ro'yxati ──────
-    elif data.startswith("tch_sub_subj_"):
-        subject_id = int(data.split("_")[-1])
-        class_id   = context.user_data.get('sub_view_class_id')
-        context.user_data['sub_view_subject_id'] = subject_id
-        subj = db.get_subject(subject_id)
-        cls  = db.get_class(class_id)
+    # ── tch_sub_group_{id} — Guruh tanlandi → darslar ro'yxati ──
+    elif data.startswith("tch_sub_group_"):
+        group_id = int(data.split("_")[-1])
+        group    = db.get_group(group_id)
+        if not group:
+            await query.edit_message_text("❌ Guruh topilmadi.")
+            return
+        context.user_data['sub_view_group_id']   = group_id
+        context.user_data['sub_view_class_id']   = None
+        context.user_data['sub_view_subject_id'] = group['subject_id']
 
-        # O'qituvchi bu sinfga yuklagan darslar (homework)
-        lessons = db.get_lessons_by_teacher_class_subject(
-            teacher['id'], class_id, subject_id, content_type='homework'
-        )
-        if not lessons:
+        # Guruhdagi birinchi sinf orqali darslarni olamiz (lesson sinf bo'yicha saqlanadi)
+        class_ids = db.get_group_class_ids(group_id)
+        all_lessons = []
+        seen_dates  = set()
+        for cid in class_ids:
+            lessons = db.get_lessons_by_teacher_class_subject(
+                teacher['id'], cid, group['subject_id'], content_type='homework'
+            )
+            for l in lessons:
+                if l['date'] not in seen_dates:
+                    seen_dates.add(l['date'])
+                    all_lessons.append(l)
+
+        all_lessons.sort(key=lambda x: x['date'], reverse=True)
+
+        if not all_lessons:
             await query.edit_message_text(
-                f"📭 *{cls['name']} | {subj['name']}*\n\n"
+                f"📭 *👥 {group['group_name']} | {group['subject_name']}*\n\n"
                 f"Hali hech qanday uyga vazifa yuklanmagan.",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🔙 Orqaga", callback_data=f"tch_sub_class_{class_id}")
+                    InlineKeyboardButton("🔙 Orqaga", callback_data="tch_cancel")
                 ]])
             )
             return
 
         btns = []
-        for l in lessons:
-            d          = l['date']
-            d_fmt      = d[8:10] + "." + d[5:7] + "." + d[:4]   # 27.02.2026
-            subs_count = db.count_submissions(class_id=class_id, subject_id=subject_id, date=d)
-            preview    = (l['content'] or "")[:20] + ("…" if l['content'] and len(l['content']) > 20 else "")
-            sub_badge  = f"  📨{subs_count}" if subs_count else ""
-            label      = f"📅 {d_fmt} | {preview or '📎 fayl'}{sub_badge}"
+        for l in all_lessons:
+            d       = l['date']
+            d_fmt   = d[8:10] + "." + d[5:7] + "." + d[:4]
+            # Barcha sinflar bo'yicha topshirmalar soni
+            total_subs = sum(
+                db.count_submissions(class_id=cid, subject_id=group['subject_id'], date=d)
+                for cid in class_ids
+            )
+            preview   = (l['content'] or "")[:20] + ("…" if l['content'] and len(l['content']) > 20 else "")
+            sub_badge = f"  📨{total_subs}" if total_subs else ""
+            label     = f"📅 {d_fmt} | {preview or '📎 fayl'}{sub_badge}"
             btns.append([InlineKeyboardButton(label, callback_data=f"tch_sub_lesson_{l['id']}")])
 
-        btns.append([InlineKeyboardButton("🔙 Orqaga", callback_data=f"tch_sub_class_{class_id}")])
+        btns.append([InlineKeyboardButton("❌ Bekor", callback_data="tch_cancel")])
         await query.edit_message_text(
-            f"📨 *{cls['name']} | {subj['name']}*\nVazifani tanlang:",
+            f"📨 *👥 {group['group_name']} | {group['subject_name']}*\nVazifani tanlang:",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(btns)
         )
+
+    # ── tch_sub_subj_{id} — Fan tanlandi → darslar ro'yxati ──────
+    elif data.startswith("tch_sub_subj_"):
+        subject_id = int(data.split("_")[-1])
+        class_id   = context.user_data.get('sub_view_class_id')
+        group_id   = context.user_data.get('sub_view_group_id')
+        context.user_data['sub_view_subject_id'] = subject_id
+        subj = db.get_subject(subject_id)
+
+        if group_id:
+            # Guruh rejimi
+            group     = db.get_group(group_id)
+            class_ids = db.get_group_class_ids(group_id)
+            all_lessons = []
+            seen_dates  = set()
+            for cid in class_ids:
+                for l in db.get_lessons_by_teacher_class_subject(
+                    teacher['id'], cid, subject_id, content_type='homework'
+                ):
+                    if l['date'] not in seen_dates:
+                        seen_dates.add(l['date'])
+                        all_lessons.append(l)
+            all_lessons.sort(key=lambda x: x['date'], reverse=True)
+
+            label_title = f"👥 {group['group_name']} | {subj['name']}" if group else subj['name']
+            back_cb     = f"tch_sub_group_{group_id}"
+
+            if not all_lessons:
+                await query.edit_message_text(
+                    f"📭 *{label_title}*\n\nHali hech qanday uyga vazifa yuklanmagan.",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🔙 Orqaga", callback_data=back_cb)
+                    ]])
+                )
+                return
+
+            btns = []
+            for l in all_lessons:
+                d          = l['date']
+                d_fmt      = d[8:10] + "." + d[5:7] + "." + d[:4]
+                total_subs = sum(
+                    db.count_submissions(class_id=cid, subject_id=subject_id, date=d)
+                    for cid in class_ids
+                )
+                preview   = (l['content'] or "")[:20] + ("…" if l['content'] and len(l['content']) > 20 else "")
+                sub_badge = f"  📨{total_subs}" if total_subs else ""
+                label     = f"📅 {d_fmt} | {preview or '📎 fayl'}{sub_badge}"
+                btns.append([InlineKeyboardButton(label, callback_data=f"tch_sub_lesson_{l['id']}")])
+            btns.append([InlineKeyboardButton("🔙 Orqaga", callback_data=back_cb)])
+            await query.edit_message_text(
+                f"📨 *{label_title}*\nVazifani tanlang:",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(btns)
+            )
+
+        else:
+            # Yakka sinf rejimi
+            cls     = db.get_class(class_id)
+            lessons = db.get_lessons_by_teacher_class_subject(
+                teacher['id'], class_id, subject_id, content_type='homework'
+            )
+            label_title = f"{cls['name']} | {subj['name']}" if cls else subj['name']
+            back_cb     = f"tch_sub_class_{class_id}"
+
+            if not lessons:
+                await query.edit_message_text(
+                    f"📭 *{label_title}*\n\nHali hech qanday uyga vazifa yuklanmagan.",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🔙 Orqaga", callback_data=back_cb)
+                    ]])
+                )
+                return
+
+            btns = []
+            for l in lessons:
+                d          = l['date']
+                d_fmt      = d[8:10] + "." + d[5:7] + "." + d[:4]
+                subs_count = db.count_submissions(class_id=class_id, subject_id=subject_id, date=d)
+                preview    = (l['content'] or "")[:20] + ("…" if l['content'] and len(l['content']) > 20 else "")
+                sub_badge  = f"  📨{subs_count}" if subs_count else ""
+                label      = f"📅 {d_fmt} | {preview or '📎 fayl'}{sub_badge}"
+                btns.append([InlineKeyboardButton(label, callback_data=f"tch_sub_lesson_{l['id']}")])
+            btns.append([InlineKeyboardButton("🔙 Orqaga", callback_data=back_cb)])
+            await query.edit_message_text(
+                f"📨 *{label_title}*\nVazifani tanlang:",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(btns)
+            )
 
     # ── tch_sub_lesson_{id} — Dars tanlandi → topshirmalar ro'yxati ─
     elif data.startswith("tch_sub_lesson_"):
         lesson_id  = int(data.split("_")[-1])
         lesson     = db.get_lesson(lesson_id)
+        group_id   = context.user_data.get('sub_view_group_id')
         class_id   = context.user_data.get('sub_view_class_id')
         subject_id = lesson['subject_id'] if lesson else context.user_data.get('sub_view_subject_id')
         subj       = db.get_subject(subject_id)
-        cls        = db.get_class(class_id)
         date_str   = lesson['date'] if lesson else ""
         d_fmt      = date_str[8:10] + "." + date_str[5:7] + "." + date_str[:4] if date_str else ""
 
-        subs = db.get_submissions(class_id=class_id, subject_id=subject_id, date=date_str)
+        if group_id:
+            # Guruh rejimi — barcha sinflardan topshirmalar
+            group     = db.get_group(group_id)
+            class_ids = db.get_group_class_ids(group_id)
+            subs      = []
+            for cid in class_ids:
+                subs.extend(db.get_submissions(class_id=cid, subject_id=subject_id, date=date_str))
+            label_title = f"👥 {group['group_name']} | {subj['name']} | {d_fmt}" if group else f"{subj['name']} | {d_fmt}"
+            back_cb     = f"tch_sub_group_{group_id}"
+        else:
+            # Yakka sinf rejimi
+            subs        = db.get_submissions(class_id=class_id, subject_id=subject_id, date=date_str)
+            cls         = db.get_class(class_id)
+            label_title = f"{cls['name']} | {subj['name']} | {d_fmt}" if cls else f"{subj['name']} | {d_fmt}"
+            back_cb     = f"tch_sub_subj_{subject_id}"
+
         if not subs:
             await query.edit_message_text(
-                f"📭 *{cls['name']} | {subj['name']} | {d_fmt}*\n\n"
-                f"Hali hech kim topshirmadi.",
+                f"📭 *{label_title}*\n\nHali hech kim topshirmadi.",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🔙 Orqaga", callback_data=f"tch_sub_subj_{subject_id}")
+                    InlineKeyboardButton("🔙 Orqaga", callback_data=back_cb)
                 ]])
             )
             return
@@ -969,25 +1404,28 @@ async def handle_teacher_callback(query, context: ContextTypes.DEFAULT_TYPE,
             [InlineKeyboardButton(f"👤 {s['student_name']}", callback_data=f"view_sub_{s['id']}")]
             for s in subs
         ]
-        btns.append([InlineKeyboardButton("🔙 Orqaga", callback_data=f"tch_sub_subj_{subject_id}")])
+        btns.append([InlineKeyboardButton("🔙 Orqaga", callback_data=back_cb)])
         await query.edit_message_text(
-            f"📨 *{cls['name']} | {subj['name']} | {d_fmt}*\n"
-            f"*{len(subs)}* ta topshirma:",
+            f"📨 *{label_title}*\n*{len(subs)}* ta topshirma:",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(btns)
         )
 
+
     # ── view_sub_{id} — Topshirmani ko'rish + baholash ───────────
     elif data.startswith("view_sub_"):
         sub_id = int(data.split("_")[-1])
-        with db.conn() as c:
-            sub = c.execute("""
-                SELECT s.*, w.full_name AS student_name, sub2.name AS subject_name
-                FROM submissions s
-                JOIN whitelist w   ON s.student_id = w.telegram_id
-                JOIN subjects sub2 ON s.subject_id = sub2.id
-                WHERE s.id = ?
-            """, (sub_id,)).fetchone()
+        with db.conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT s.*, w.full_name AS student_name, sub2.name AS subject_name
+                    FROM submissions s
+                    JOIN whitelist w   ON s.student_id = w.telegram_id
+                    JOIN subjects sub2 ON s.subject_id = sub2.id
+                    WHERE s.id = %s
+                """, (sub_id,))
+                row = cur.fetchone()
+                sub = dict(zip([d[0] for d in cur.description], row)) if row else None
         if not sub:
             await query.edit_message_text("❌ Topshirma topilmadi.")
             return
@@ -1070,14 +1508,17 @@ async def handle_teacher_callback(query, context: ContextTypes.DEFAULT_TYPE,
         sub_id = int(parts[0])
         score  = int(parts[1])
 
-        with db.conn() as c:
-            sub = c.execute("""
-                SELECT s.*, w.full_name AS student_name, sub2.name AS subject_name
-                FROM submissions s
-                JOIN whitelist w   ON s.student_id = w.telegram_id
-                JOIN subjects sub2 ON s.subject_id = sub2.id
-                WHERE s.id = ?
-            """, (sub_id,)).fetchone()
+        with db.conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT s.*, w.full_name AS student_name, sub2.name AS subject_name
+                    FROM submissions s
+                    JOIN whitelist w   ON s.student_id = w.telegram_id
+                    JOIN subjects sub2 ON s.subject_id = sub2.id
+                    WHERE s.id = %s
+                """, (sub_id,))
+                row = cur.fetchone()
+                sub = dict(zip([d[0] for d in cur.description], row)) if row else None
         if not sub:
             await query.edit_message_text("❌ Topshirma topilmadi.")
             return
@@ -1164,21 +1605,42 @@ async def handle_teacher_callback(query, context: ContextTypes.DEFAULT_TYPE,
         if data == "tch_hw_add":
             context.user_data['teacher_action'] = 'add_homework'
             classes = db.get_teacher_classes(teacher['id'])
-            if not classes:
+            groups = db.get_teacher_groups(teacher['id'])  # YANGI: Guruhlar
+            
+            if not classes and not groups:
                 await query.edit_message_text(
-                    "❌ Sizga hali sinf biriktirilmagan.",
+                    "❌ Sizga hali sinf yoki guruh biriktirilmagan.",
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton("❌ Bekor", callback_data="tch_cancel")
                     ]])
                 )
                 return
-            btns = [
-                [InlineKeyboardButton(f"🏫 {c['name']}", callback_data=f"tch_class_{c['id']}")]
-                for c in classes
-            ]
+            
+            btns = []
+            
+            # Yakka sinflar
+            if classes:
+                btns.append([InlineKeyboardButton("📚 Yakka sinflar ⬇", callback_data="noop")])
+                for c in classes:
+                    btns.append([InlineKeyboardButton(
+                        f"  🏫 {c['name']}", 
+                        callback_data=f"tch_class_{c['id']}"
+                    )])
+            
+            # Sinf guruhlari
+            if groups:
+                btns.append([InlineKeyboardButton("👥 Sinf guruhlari ⬇", callback_data="noop")])
+                for g in groups:
+                    btns.append([InlineKeyboardButton(
+                        f"  👥 {g['group_name']} ({g['class_count']} ta sinf)", 
+                        callback_data=f"tch_group_{g['id']}"
+                    )])
+            
             btns.append([InlineKeyboardButton("❌ Bekor", callback_data="tch_cancel")])
+            
             await query.edit_message_text(
-                "📝 *Uyga vazifa qo'shish* — Sinf tanlang:",
+                "📝 *Uyga vazifa qo'shish*\n\n"
+                "Sinf yoki guruh tanlang:",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(btns)
             )
@@ -1635,6 +2097,68 @@ async def handle_teacher_callback(query, context: ContextTypes.DEFAULT_TYPE,
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(btns)
         )
+    
+    # ── tch_group_date_{date} — Guruh uchun sana tanlandi ───────
+    elif data.startswith("tch_group_date_"):
+        date_str = data[len("tch_group_date_"):]
+        group_id = context.user_data.get('teacher_group')
+        group = db.get_group(group_id)
+
+        context.user_data['teacher_lesson_date'] = date_str
+        context.user_data['waiting_for'] = 'tch_hw_content_group'
+
+        d_fmt = date_str[8:10] + "." + date_str[5:7] + "." + date_str[:4]
+
+        await query.edit_message_text(
+            f"📝 *Guruhga uyga vazifa*\n\n"
+            f"👥 Guruh: *{group['group_name']}*\n"
+            f"📚 Fan: {group['subject_name']}\n"
+            f"📅 Sana: {d_fmt}\n\n"
+            f"✍️ *Vazifa matnini yozing yoki fayl yuboring:*\n"
+            f"_(Matn, rasm, video, hujjat yuborishingiz mumkin)_",
+            parse_mode="Markdown",
+            reply_markup=kb_cancel_teacher()
+        )
+
+    # ── tch_group_{id} — Guruh tanlandi → sana tanlash ──────────
+    elif data.startswith("tch_group_"):
+        group_id = int(data.split("_")[-1])
+        group = db.get_group(group_id)
+
+        if not group:
+            await query.edit_message_text("❌ Guruh topilmadi.")
+            return
+
+        context.user_data['teacher_group'] = group_id
+        context.user_data['teacher_action'] = 'add_homework_group'
+
+        label = "📖 Mavzu" if context.user_data.get('teacher_action') == 'add_topic' else "📝 Uyga vazifa"
+
+        from utils.keyboards import kb_schedule_dates, kb_dates
+        sched_dates = db.get_teacher_group_dates(teacher['id'], group_id)
+
+        if sched_dates:
+            await query.edit_message_text(
+                f"{label} | 👥 *{group['group_name']}*\n"
+                f"📚 {group['subject_name']}\n"
+                f"🏫 {group['class_count']} ta sinf\n\n"
+                f"📅 *Dars o'tgan kunlardan birini tanlang:*\n"
+                f"_(Faqat jadvalidagi dars kunlari ko'rsatilmoqda)_",
+                parse_mode="Markdown",
+                reply_markup=kb_schedule_dates(sched_dates, prefix="tch_group_date")
+            )
+        else:
+            # Jadval kiritilmagan — oddiy sana tanlash
+            await query.edit_message_text(
+                f"{label} | 👥 *{group['group_name']}*\n"
+                f"📚 {group['subject_name']}\n"
+                f"🏫 {group['class_count']} ta sinf\n\n"
+                f"📅 *Sana tanlang:*\n"
+                f"⚠️ _(Bu guruh uchun haftalik jadval kiritilmagan)_",
+                parse_mode="Markdown",
+                reply_markup=kb_dates(prefix="tch_group_date")
+            )
+
 
     # ── tch_subj_{id} — Fan tanlandi → jadval bo'yicha sanalar ────
     elif data.startswith("tch_subj_"):
@@ -1704,11 +2228,9 @@ async def handle_teacher_callback(query, context: ContextTypes.DEFAULT_TYPE,
 
     # ── tch_att_prev_{teacher_id} — Oldingi oy davomati ──────────
     elif data.startswith("tch_att_prev_"):
-        from datetime import date
         current_month = context.user_data.get('tch_att_month', date.today().strftime("%Y-%m"))
         parts = current_month.split("-")
         year, month = int(parts[0]), int(parts[1])
-        # Oldingi oy — standart datetime
         if month == 1:
             year, month = year - 1, 12
         else:
@@ -1717,14 +2239,27 @@ async def handle_teacher_callback(query, context: ContextTypes.DEFAULT_TYPE,
         context.user_data['tch_att_month'] = prev
 
         records = db.get_teacher_attendance_for_teacher(teacher['id'], prev)
-        STATUS_EMOJI = {'present': '✅', 'absent': '❌', 'late': '⏰'}
-        STATUS_LABEL = {'present': 'Keldi', 'absent': 'Kelmadi', 'late': 'Kech keldi'}
-        lines = [f"📊 *Mening davomatim — {prev}*\n"]
+        STATUS_EMOJI = {'present': '✅', 'absent': '❌', 'late': '⏰', 'excused': '📝'}
+        STATUS_LABEL = {'present': 'Keldi', 'absent': 'Kelmadi', 'late': 'Kech keldi', 'excused': 'Sababli'}
+        present = sum(1 for r in records if r['status'] == 'present')
+        absent  = sum(1 for r in records if r['status'] == 'absent')
+        late    = sum(1 for r in records if r['status'] == 'late')
+        excused = sum(1 for r in records if r['status'] == 'excused')
+        lines = [
+            f"📊 *Mening davomatim — {prev}*\n",
+            f"✅ Keldi: *{present}* kun",
+            f"❌ Kelmadi: *{absent}* kun",
+            f"⏰ Kech keldi: *{late}* kun",
+        ]
+        if excused:
+            lines.append(f"📝 Sababli: *{excused}* kun")
         if records:
+            lines.append("\n📋 *Kunlar bo'yicha:*")
             for r in records:
                 emoji = STATUS_EMOJI.get(r['status'], '?')
                 label = STATUS_LABEL.get(r['status'], r['status'])
-                lines.append(f"  {emoji} {r['date']} — {label}")
+                hours_txt = f" | ⏱ {r['hours']} soat" if r.get('hours') else ""
+                lines.append(f"  {emoji} {r['date']} — {label}{hours_txt}")
         else:
             lines.append("❌ Bu oy uchun ma'lumot yo'q.")
         await query.edit_message_text(

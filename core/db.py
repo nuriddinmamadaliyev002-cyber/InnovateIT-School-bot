@@ -12,6 +12,7 @@ from core.repositories.user_repo       import UserRepo
 from core.repositories.lesson_repo     import LessonRepo
 from core.repositories.attendance_repo import AttendanceRepo
 from core.repositories.grade_repo      import GradeRepo, ScheduleRepo
+from core.repositories.class_group_repo import ClassGroupRepo
 from core.database import BaseDB
 
 
@@ -23,6 +24,7 @@ class DB(
     AttendanceRepo,
     GradeRepo,
     ScheduleRepo,
+    ClassGroupRepo,
 ):
     """
     Yagona DB obyekti — barcha operatsiyalarga kirish nuqtasi.
@@ -40,3 +42,4 @@ class DB(
     def __init__(self):
         BaseDB.__init__(self)
         self.init_tables()
+        self.run_migrations()

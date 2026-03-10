@@ -239,6 +239,70 @@ class ScheduleRepo(BaseDB):
         result.extend(past)
         return result
 
+    def get_teacher_group_dates(self, teacher_id: int, group_id: int) -> list:
+        """
+        Guruh uchun jadval bo'yicha sanalar:
+        Guruhdagi barcha sinflarning dars kunlari birlashtiriladi (union),
+        bugun (agar dars bo'lsa) + oxirgi 2 ta o'tgan kun.
+        """
+        import datetime
+        # Guruhdagi barcha sinflar
+        from core.repositories.class_group_repo import ClassGroupRepo
+        class_ids = ClassGroupRepo.get_group_class_ids(self, group_id)
+        group_info = ClassGroupRepo.get_group(self, group_id)
+        if not group_info or not class_ids:
+            return []
+        subject_id = group_info['subject_id']
+
+        # Barcha sinflar uchun haftalik jadval slotlarini to'plash (weekday → slot)
+        lesson_weekdays = {}
+        with self.conn() as conn:
+            for class_id in class_ids:
+                slots = self._fetchall(conn, """
+                    SELECT weekday, start_time, end_time
+                    FROM teacher_weekly_schedule
+                    WHERE teacher_id=%s AND class_id=%s AND subject_id=%s
+                """, (teacher_id, class_id, subject_id))
+                for s in slots:
+                    wd = s['weekday']
+                    if wd not in lesson_weekdays:
+                        lesson_weekdays[wd] = s
+
+        if not lesson_weekdays:
+            return []
+
+        today    = datetime.date.today()
+        today_wd = today.weekday()
+        result   = []
+
+        # Bugun dars bormi?
+        if today_wd in lesson_weekdays:
+            slot = lesson_weekdays[today_wd]
+            result.append({
+                'date': today.isoformat(), 'weekday': today_wd,
+                'start_time': slot['start_time'] or '',
+                'end_time':   slot['end_time']   or '',
+            })
+
+        # Oxirgi 2 ta o'tgan dars kuni
+        past = []
+        for delta in range(1, 90):
+            d  = today - datetime.timedelta(days=delta)
+            wd = d.weekday()
+            if wd in lesson_weekdays:
+                slot = lesson_weekdays[wd]
+                past.append({
+                    'date': d.isoformat(), 'weekday': wd,
+                    'start_time': slot['start_time'] or '',
+                    'end_time':   slot['end_time']   or '',
+                })
+            if len(past) == 2:
+                break
+
+        result.extend(past)
+        return result
+
+
     def get_today_teachers(self, school_id, weekday) -> list:
         with self.conn() as conn:
             return self._fetchall(conn, """

@@ -70,16 +70,28 @@ class SchoolRepo(BaseDB):
     def get_school_stats(self, school_id: int) -> dict:
         with self.conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM whitelist WHERE school_id=%s", (school_id,))
-                students = cur.fetchone()[0]
-                cur.execute("SELECT COUNT(*) FROM teachers WHERE school_id=%s", (school_id,))
-                teachers = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM whitelist WHERE school_id=%s AND is_active=1", (school_id,))
+                students_active = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM whitelist WHERE school_id=%s AND is_active=0", (school_id,))
+                students_archived = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM teachers WHERE school_id=%s AND is_active=1", (school_id,))
+                teachers_active = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM teachers WHERE school_id=%s AND is_active=0", (school_id,))
+                teachers_archived = cur.fetchone()[0]
                 cur.execute("SELECT COUNT(*) FROM classes WHERE school_id=%s", (school_id,))
                 classes = cur.fetchone()[0]
                 cur.execute("SELECT COUNT(*) FROM subjects WHERE school_id=%s", (school_id,))
                 subjects = cur.fetchone()[0]
-        return {"students": students, "teachers": teachers,
-                "classes": classes, "subjects": subjects}
+        return {
+            "students":          students_active + students_archived,
+            "students_active":   students_active,
+            "students_archived": students_archived,
+            "teachers":          teachers_active + teachers_archived,
+            "teachers_active":   teachers_active,
+            "teachers_archived": teachers_archived,
+            "classes":           classes,
+            "subjects":          subjects,
+        }
 
     def get_school_admin(self, telegram_id: int):
         with self.conn() as conn:

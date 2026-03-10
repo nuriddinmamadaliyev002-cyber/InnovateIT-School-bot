@@ -54,10 +54,32 @@ async def handle_waiting(update: Update, context: ContextTypes.DEFAULT_TYPE, wai
         cid  = context.user_data.pop('tmp_class_id', None)
         if not name or not cid:
             return
-        with db.conn() as c:
-            c.execute("UPDATE classes SET name=? WHERE id=?", (name, cid))
+        with db.conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE classes SET name=%s WHERE id=%s", (name, cid))
+            conn.commit()
         context.user_data.pop('waiting_for', None)
         await update.message.reply_text(f"✅ Sinf nomi *{name}* ga o'zgartirildi.", parse_mode="Markdown")
+
+    elif waiting == 'adm_rename_teacher':
+        new_name   = text.strip()
+        teacher_id = context.user_data.pop('tmp_rename_teacher_id', None)
+        context.user_data.pop('waiting_for', None)
+        if not new_name:
+            await update.message.reply_text("❌ Ism bo'sh bo'lishi mumkin emas.")
+            return
+        if not teacher_id:
+            await update.message.reply_text("❌ Xatolik yuz berdi. Qaytadan boshlang.")
+            return
+        db.rename_teacher(teacher_id, new_name)
+        await update.message.reply_text(
+            f"✅ Ism muvaffaqiyatli o'zgartirildi!\n\n"
+            f"👨‍🏫 Yangi ism: *{new_name}*",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 O'qituvchi kartasi", callback_data=f"adm_teacher_info_{teacher_id}")
+            ]])
+        )
 
     # ── O'QUVCHILAR ──────────────────────────────────────────────
 
@@ -127,6 +149,27 @@ async def handle_waiting(update: Update, context: ContextTypes.DEFAULT_TYPE, wai
             reply_markup=kb_classes(classes, prefix="adm_student_class")
         )
 
+    elif waiting == 'adm_rename_student':
+        new_name = text.strip()
+        tid = context.user_data.pop('tmp_rename_student_tid', None)
+        cid = context.user_data.pop('tmp_rename_student_cid', None)
+        context.user_data.pop('waiting_for', None)
+        if not new_name:
+            await update.message.reply_text("❌ Ism bo'sh bo'lishi mumkin emas.")
+            return
+        if not tid:
+            await update.message.reply_text("❌ Xatolik yuz berdi. Qaytadan boshlang.")
+            return
+        db.rename_student(tid, new_name)
+        await update.message.reply_text(
+            f"✅ Ism muvaffaqiyatli o'zgartirildi!\n\n"
+            f"👤 Yangi ism: *{new_name}*",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 O'quvchilar ro'yxati", callback_data=f"adm_students_of_{cid}")
+            ]])
+        )
+
     # ── FANLAR ───────────────────────────────────────────────────
 
     elif waiting == 'adm_new_subject':
@@ -153,8 +196,10 @@ async def handle_waiting(update: Update, context: ContextTypes.DEFAULT_TYPE, wai
         sid  = context.user_data.pop('tmp_subject_id', None)
         if not name or not sid:
             return
-        with db.conn() as c:
-            c.execute("UPDATE subjects SET name=? WHERE id=?", (name, sid))
+        with db.conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE subjects SET name=%s WHERE id=%s", (name, sid))
+            conn.commit()
         context.user_data.pop('waiting_for', None)
         await update.message.reply_text(f"✅ Fan nomi *{name}* ga o'zgartirildi.", parse_mode="Markdown")
 
@@ -447,6 +492,112 @@ async def handle_waiting(update: Update, context: ContextTypes.DEFAULT_TYPE, wai
             await update.message.reply_text(
                 f"❌ Biriktirishda xatolik. Bu ID allaqachon biriktirilgan bo'lishi mumkin."
             )
+
+    elif waiting == 'adm_group_name':
+        teacher_id       = context.user_data.get('tmp_teacher_id')
+        subject_id       = context.user_data.get('tmp_subject_id')
+        selected_classes = context.user_data.get('tmp_selected_classes', [])
+
+        # Tozalash har doim ishlaydi
+        def _cleanup():
+            context.user_data.pop('waiting_for', None)
+            context.user_data.pop('tmp_teacher_id', None)
+            context.user_data.pop('tmp_subject_id', None)
+            context.user_data.pop('tmp_selected_classes', None)
+
+        # Majburiy ma'lumotlar yo'qligini tekshirish
+        if not teacher_id or not subject_id or not selected_classes:
+            _cleanup()
+            await update.message.reply_text(
+                "❌ Ma'lumotlar yo'qoldi. Qaytadan boshlang.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Orqaga", callback_data="adm_assign_teacher")
+                ]])
+            )
+            return
+
+        from config import logger
+
+        # /skip - avtomatik nom
+        group_name = None if text.strip().lower() in ('/skip', 'skip') else text.strip()
+
+        try:
+            group_id = db.create_group(
+                teacher_id=teacher_id,
+                subject_id=subject_id,
+                school_id=school_id,
+                class_ids=selected_classes,
+                group_name=group_name
+            )
+
+            # Har bir sinf uchun individual assignment (o'qituvchi panelda ko'rinishi uchun)
+            for class_id in selected_classes:
+                existing = db.get_teacher_assignments(teacher_id)
+                already = any(
+                    a['class_id'] == class_id and a['subject_id'] == subject_id
+                    for a in existing
+                )
+                if not already:
+                    db.assign_teacher(teacher_id, class_id, subject_id)
+
+            teacher = db.get_teacher_by_id(teacher_id)
+            subject  = db.get_subject(subject_id)
+            group    = db.get_group(group_id)
+
+            _cleanup()
+            await update.message.reply_text(
+                f"✅ *Guruh yaratildi!*\n\n"
+                f"👥 *{group['group_name']}*\n"
+                f"👨‍🏫 {teacher['full_name']}\n"
+                f"📚 {subject['name']}\n"
+                f"🏫 {group['class_count']} ta sinf\n\n"
+                f"_O'qituvchi endi yakka sinflar va guruh orqali vazifa yuborishi mumkin._",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("➕ Yana qo'shish", callback_data="adm_assign_teacher")],
+                    [InlineKeyboardButton("📋 O'qituvchilar",  callback_data="adm_list_teachers")],
+                ])
+            )
+
+        except Exception as e:
+            logger.error(f"Error creating group: {e}", exc_info=True)
+            _cleanup()
+            # parse_mode ishlatmaymiz — exception matni Markdown ni buzishi mumkin
+            await update.message.reply_text(
+                f"❌ Xatolik yuz berdi:\n\n{str(e)}\n\nIltimos, yana urinib ko'ring.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Orqaga", callback_data="adm_assign_teacher")
+                ]])
+            )
+    
+    elif waiting == 'adm_group_rename':
+        # Guruh nomini o'zgartirish
+        group_id = context.user_data.get('tmp_group_id')
+        new_name = text.strip()
+        
+        if not new_name:
+            await update.message.reply_text("❌ Nom bo'sh bo'lmasligi kerak!")
+            return
+        
+        db.update_group_name(group_id, new_name)
+        group = db.get_group(group_id)
+        classes = db.get_group_classes(group_id)
+        class_names = ", ".join([c['name'] for c in classes])
+        
+        await update.message.reply_text(
+            f"✅ *Guruh nomi o'zgartirildi!*\n\n"
+            f"👥 Yangi nom: *{new_name}*\n"
+            f"👨‍🏫 {group['teacher_name']}\n"
+            f"📚 {group['subject_name']}\n"
+            f"🏫 Sinflar: {class_names}",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Guruh", callback_data=f"adm_group_view_{group_id}")
+            ]])
+        )
+        
+        context.user_data.pop('waiting_for', None)
+        context.user_data.pop('tmp_group_id', None)
 
     elif waiting == 'adm_att_custom_date':
         # Admin qo'lda sana kiritib davomat oladi

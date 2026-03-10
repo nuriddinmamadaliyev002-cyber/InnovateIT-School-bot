@@ -32,31 +32,49 @@ def kb_student_attendance(students: list, att_data: dict,
     return InlineKeyboardMarkup(btns)
 
 
-def kb_teacher_attendance(teachers_data: list) -> InlineKeyboardMarkup:
+def kb_teacher_attendance(teachers_data: list, is_saved: bool = False, editing_id: int = None) -> InlineKeyboardMarkup:
     """
-    teachers_data: [{'id', 'full_name', 'status', 'comment'(optional)}, ...]
-    Hamma belgilansa — sarlavhada ✅ ko'rinadi.
+    teachers_data: [{'id', 'full_name', 'status', 'comment'(optional), 'hours'(optional)}, ...]
+    is_saved: True bo'lsa, barcha o'qituvchilar saqlangan
+    editing_id: Tahrir qilinayotgan o'qituvchi ID'si
+    - Har bir o'qituvchi qatorida tahrir/saqlash tugmasi
+    - Soat faqat 'present' yoki 'late' statusida ko'rinadi
     """
     btns = []
-    all_marked = all(
-        t.get("status", "present") != "present" or True  # present ham hisoblanadi
-        for t in teachers_data
-    )
-    # Agar hamma o'qituvchi "present" bo'lmasa — hammasini belgilangan deb hisoblaymiz
-    # "present" default — lekin faqat saqlangan bo'lsa haqiqiy belgilangan
     for t in teachers_data:
-        status = t.get("status", "present")
-        emoji  = ATTENDANCE_EMOJI.get(status, "✅")
-        comment = t.get("comment", "")
-        comment_icon = " 💬" if comment else ""
-        btns.append([InlineKeyboardButton(
-            f"{emoji} {t['full_name'][:28]}{comment_icon}",
-            callback_data=f"tadm_toggle_{t['id']}"
-        )])
+        status  = t.get("status", "present")
+        emoji   = ATTENDANCE_EMOJI.get(status, "✅")
+        comment = t.get("comment", "") or ""
+        hours   = t.get("hours")
+        tid     = t['id']
+
+        # Qo'shimcha info: izoh va soat
+        extra = ""
+        if comment:
+            short = comment[:15] + "…" if len(comment) > 15 else comment
+            extra += f" 💬{short}"
+        # Soat faqat "Keldi" yoki "Kech keldi" da ko'rinsin
+        if hours and status in ('present', 'late'):
+            extra += f" ⏱{hours}s"  # 's' = 'soat' degan ma'no
+
+        name = t['full_name'][:22]
+        
+        # Agar shu o'qituvchi tahrir qilinayotgan bo'lsa
+        if editing_id == tid:
+            # Ism + Saqlash tugmasi
+            btns.append([
+                InlineKeyboardButton(f"{emoji} {name}{extra}", callback_data=f"tadm_toggle_{tid}"),
+                InlineKeyboardButton("💾", callback_data=f"tadm_save_one_{tid}")
+            ])
+        else:
+            # Ism + Tahrir tugmasi
+            btns.append([
+                InlineKeyboardButton(f"{emoji} {name}{extra}", callback_data=f"tadm_toggle_{tid}"),
+                InlineKeyboardButton("✏️", callback_data=f"tadm_edit_one_{tid}")
+            ])
 
     btns.append([
-        InlineKeyboardButton("💾 Saqlash", callback_data="tadm_save"),
-        InlineKeyboardButton("❌ Bekor",   callback_data="tadm_cancel"),
+        InlineKeyboardButton("🔙 Orqaga", callback_data="tadm_back_dates"),
     ])
     return InlineKeyboardMarkup(btns)
 

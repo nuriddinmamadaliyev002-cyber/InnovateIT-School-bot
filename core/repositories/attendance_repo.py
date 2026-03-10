@@ -73,7 +73,8 @@ class AttendanceRepo(BaseDB):
     # ── O'qituvchi davomati ──────────────────────────────────────
 
     def save_teacher_attendance(self, school_id: int, date: str,
-                                attendance_data: dict, comments: dict = None):
+                                attendance_data: dict, comments: dict = None,
+                                hours: float = None):
         comments = comments or {}
         with self.conn() as conn:
             with conn.cursor() as cur:
@@ -81,11 +82,13 @@ class AttendanceRepo(BaseDB):
                     comment = comments.get(str(teacher_id))
                     cur.execute("""
                         INSERT INTO teacher_attendance
-                            (teacher_id, date, status, school_id, comment)
-                        VALUES (%s, %s, %s, %s, %s)
+                            (teacher_id, date, status, school_id, comment, hours)
+                        VALUES (%s, %s, %s, %s, %s, %s)
                         ON CONFLICT(teacher_id, date)
-                        DO UPDATE SET status=EXCLUDED.status, comment=EXCLUDED.comment
-                    """, (int(teacher_id), date, status, school_id, comment))
+                        DO UPDATE SET status=EXCLUDED.status,
+                                      comment=EXCLUDED.comment,
+                                      hours=EXCLUDED.hours
+                    """, (int(teacher_id), date, status, school_id, comment, hours))
             conn.commit()
 
     def get_teacher_attendance(self, school_id: int, date: str) -> list:
@@ -132,12 +135,62 @@ class AttendanceRepo(BaseDB):
     def get_teacher_monthly_attendance(self, school_id: int, month: str) -> list:
         with self.conn() as conn:
             return self._fetchall(conn, """
-                SELECT t.full_name, ta.date, ta.status, ta.comment
+                SELECT ta.teacher_id, t.full_name, ta.date, ta.status, ta.comment, ta.hours
                 FROM teacher_attendance ta
                 JOIN teachers t ON ta.teacher_id = t.id
                 WHERE ta.school_id=%s AND TO_CHAR(ta.date::date, 'YYYY-MM')=%s
                 ORDER BY t.full_name, ta.date
             """, (school_id, month))
+
+    def get_teacher_monthly_full_report(self, school_id: int, month: str) -> list:
+        """
+        Oylik to'liq hisobot: davomat yozilgan kunlar + dars bo'lib
+        davomat kiritilmagan kunlar (not_marked) birgalikda qaytariladi.
+        """
+        with self.conn() as conn:
+            return self._fetchall(conn, """
+                WITH month_days AS (
+                    SELECT generate_series(
+                        (%s || '-01')::date,
+                        ((%s || '-01')::date + interval '1 month' - interval '1 day'),
+                        '1 day'::interval
+                    )::date AS day
+                ),
+                teacher_weekdays AS (
+                    SELECT DISTINCT t.id AS teacher_id, t.full_name, ws.weekday
+                    FROM teacher_weekly_schedule ws
+                    JOIN teachers t ON ws.teacher_id = t.id
+                    WHERE ws.school_id = %s
+                ),
+                expected_days AS (
+                    SELECT tw.teacher_id, tw.full_name, md.day
+                    FROM month_days md
+                    JOIN teacher_weekdays tw ON (
+                        CASE EXTRACT(DOW FROM md.day)::int
+                            WHEN 0 THEN 6
+                            WHEN 1 THEN 0
+                            WHEN 2 THEN 1
+                            WHEN 3 THEN 2
+                            WHEN 4 THEN 3
+                            WHEN 5 THEN 4
+                            WHEN 6 THEN 5
+                        END = tw.weekday
+                    )
+                )
+                SELECT
+                    ed.teacher_id,
+                    ed.full_name,
+                    ed.day::text AS date,
+                    COALESCE(ta.status, 'not_marked') AS status,
+                    ta.comment,
+                    ta.hours
+                FROM expected_days ed
+                LEFT JOIN teacher_attendance ta
+                    ON ta.teacher_id = ed.teacher_id
+                    AND ta.date = ed.day::text
+                    AND ta.school_id = %s
+                ORDER BY ed.full_name, ed.day
+            """, (month, month, school_id, school_id))
 
     def get_teacher_att_stats(self, teacher_id: int, month: str = None) -> dict:
         records = self.get_teacher_attendance_for_teacher(teacher_id, month)

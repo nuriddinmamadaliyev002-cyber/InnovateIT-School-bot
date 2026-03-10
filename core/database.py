@@ -158,6 +158,7 @@ class BaseDB:
                 status     TEXT NOT NULL DEFAULT 'present',
                 school_id  INTEGER NOT NULL REFERENCES schools(id),
                 comment    TEXT,
+                hours      NUMERIC(4,1),
                 UNIQUE(teacher_id, date)
             );
             CREATE TABLE IF NOT EXISTS grades (
@@ -192,8 +193,48 @@ class BaseDB:
                 label               TEXT NOT NULL DEFAULT 'Ota/Ona',
                 added_at            TEXT DEFAULT TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
             );
+            CREATE TABLE IF NOT EXISTS class_groups (
+                id         SERIAL PRIMARY KEY,
+                group_name TEXT NOT NULL,
+                teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+                subject_id INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+                school_id  INTEGER NOT NULL REFERENCES schools(id),
+                created_at TEXT DEFAULT TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+            );
+            CREATE TABLE IF NOT EXISTS class_group_members (
+                id       SERIAL PRIMARY KEY,
+                group_id INTEGER NOT NULL REFERENCES class_groups(id) ON DELETE CASCADE,
+                class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+                UNIQUE(group_id, class_id)
+            );
         """
         with self.conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql)
+            conn.commit()
+
+    def run_migrations(self):
+        """
+        Mavjud bazaga yangi ustunlarni xavfsiz qo'shadi.
+        Bot har ishga tushganda avtomatik chaqiriladi.
+        """
+        migrations = [
+            # (jadval, ustun, tip)
+            ("teacher_attendance", "hours", "NUMERIC(4,1)"),
+        ]
+        with self.conn() as conn:
+            with conn.cursor() as cur:
+                for table, column, col_type in migrations:
+                    cur.execute("""
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name=%s AND column_name=%s
+                    """, (table, column))
+                    if not cur.fetchone():
+                        cur.execute(
+                            f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+                        )
+                        import logging
+                        logging.getLogger(__name__).info(
+                            f"Migration: {table}.{column} ({col_type}) qo'shildi"
+                        )
             conn.commit()
